@@ -30,6 +30,8 @@ jobs:
               xargs -0 sed -i 's/package:fl_clash\//package:ikun_clash\//g' || true
           fi
 
+          echo "Package references fixed."
+
       - name: Fix Dart SDK constraint
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
@@ -60,7 +62,10 @@ jobs:
             exit 1
           fi
 
+          echo "sdkmanager: $SDKMANAGER"
+
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+
           "$SDKMANAGER" "ndk;27.3.13750724"
 
           NDK_PATH="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
@@ -71,51 +76,82 @@ jobs:
           CLANG="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
 
           if [ ! -x "$CLANG" ]; then
-            echo "ARM64 clang not found:"
-            echo "$CLANG"
+            echo "ARM64 clang not found"
             exit 1
           fi
 
+          echo "ARM64 clang:"
           "$CLANG" --version
+
+          echo "NDK setup OK."
 
       - name: Setup libclang
         run: |
           sudo apt-get update
           sudo apt-get install -y clang libclang-dev libclang-18-dev
 
-          LLVM_DIR="/usr/lib/llvm-18/lib"
+          NDK_LLVM="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64"
 
-          if [ ! -d "$LLVM_DIR" ]; then
-            LLVM_DIR=$(find /usr/lib -type d -path "*/llvm-*/lib" | head -n 1)
-          fi
+          echo "NDK LLVM directory:"
+          echo "$NDK_LLVM"
 
-          if [ -z "$LLVM_DIR" ] || [ ! -d "$LLVM_DIR" ]; then
-            echo "LLVM directory not found"
-            exit 1
-          fi
+          echo "Searching system libclang..."
 
-          LIBCLANG_FILE=$(find "$LLVM_DIR" -maxdepth 2 -type f -name "libclang*.so*" | head -n 1)
+          LIBCLANG_FILE=$(find /usr/lib -type f -name "libclang.so*" | head -n 1)
 
           if [ -z "$LIBCLANG_FILE" ]; then
-            echo "libclang not found"
+            echo "System libclang not found."
             find /usr/lib -name "libclang*.so*" -print || true
             exit 1
           fi
 
-          if [ ! -e "$LLVM_DIR/libclang.so" ]; then
-            sudo ln -sf "$LIBCLANG_FILE" "$LLVM_DIR/libclang.so"
-          fi
+          echo "Found:"
+          echo "$LIBCLANG_FILE"
 
-          echo "LIBCLANG_PATH=$LLVM_DIR" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=$LLVM_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          # rust_api 的 hook 会直接检查 NDK 的 lib/lib64
+          mkdir -p "$NDK_LLVM/lib"
 
-          echo "libclang OK:"
-          ls -la "$LLVM_DIR"/libclang*.so*
+          sudo ln -sf "$LIBCLANG_FILE" "$NDK_LLVM/lib/libclang.so"
+
+          # 同时放到 lib64，兼容 hook 的另一种搜索路径
+          mkdir -p "$NDK_LLVM/lib64"
+
+          sudo ln -sf "$LIBCLANG_FILE" "$NDK_LLVM/lib64/libclang.so"
+
+          # 设置运行时搜索路径
+          echo "LIBCLANG_PATH=$NDK_LLVM/lib" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$NDK_LLVM/lib:$NDK_LLVM/lib64:/usr/lib/llvm-18/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+          echo "========== NDK lib =========="
+          ls -la "$NDK_LLVM/lib"
+
+          echo "========== NDK lib64 =========="
+          ls -la "$NDK_LLVM/lib64"
+
+          echo "libclang fixed inside NDK."
 
       - name: Check Rust libclang
         run: |
-          echo "LIBCLANG_PATH=$LIBCLANG_PATH"
-          ls -la "$LIBCLANG_PATH"/libclang*.so*
+          NDK_LLVM="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64"
+
+          echo "Checking:"
+          echo "$NDK_LLVM"
+
+          if [ ! -e "$NDK_LLVM/lib/libclang.so" ]; then
+            echo "NDK lib/libclang.so NOT FOUND"
+            exit 1
+          fi
+
+          if [ ! -e "$NDK_LLVM/lib64/libclang.so" ]; then
+            echo "NDK lib64/libclang.so NOT FOUND"
+            exit 1
+          fi
+
+          echo "libclang in NDK:"
+          ls -la "$NDK_LLVM/lib/libclang.so"
+          ls -la "$NDK_LLVM/lib64/libclang.so"
+
+          echo "Rust libclang check OK."
 
       - name: Force NDK version
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -132,9 +168,10 @@ jobs:
               android/app/build.gradle.kts
           fi
 
+          echo "NDK configuration:"
           grep -R "ndkVersion" android 2>/dev/null || true
 
-      - name: Fix IkunBanner
+      - name: Fix dashboard const error
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
           FILE="lib/views/dashboard/dashboard.dart"
@@ -144,10 +181,25 @@ jobs:
             exit 1
           fi
 
-          echo "Searching IkunBanner..."
+          echo "Before patch:"
+          nl -ba "$FILE" | sed -n '205,218p'
 
-          grep -R "class IkunBanner" lib plugins 2>/dev/null || true
-          grep -R "IkunBanner" lib/views/dashboard 2>/dev/null || true
+          sed -i 's/const GridItem(/GridItem(/g' "$FILE"
+
+          echo "After patch:"
+          nl -ba "$FILE" | sed -n '205,218p'
+
+          echo "Dashboard const fix OK."
+
+      - name: Fix IkunBanner
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: |
+          FILE="lib/views/dashboard/dashboard.dart"
+
+          if grep -q "class IkunBanner" "$FILE"; then
+            echo "IkunBanner already exists."
+            exit 0
+          fi
 
           python3 <<'PY'
           from pathlib import Path
@@ -155,13 +207,9 @@ jobs:
           file = Path("lib/views/dashboard/dashboard.dart")
           text = file.read_text()
 
-          # 如果已经存在定义，就不重复添加
           if "class IkunBanner" in text:
-              print("IkunBanner class already exists.")
+              print("IkunBanner already exists.")
               raise SystemExit(0)
-
-          # 确保 dashboard 中使用的是普通 GridItem
-          text = text.replace("const GridItem(", "GridItem(")
 
           banner = r'''
 
@@ -196,17 +244,21 @@ jobs:
 
       - name: Check build environment
         run: |
+          echo "========== Flutter =========="
           flutter --version
+
+          echo "========== Dart =========="
           dart --version
 
-          echo "NDK:"
+          echo "========== NDK =========="
           echo "$ANDROID_NDK_ROOT"
 
-          echo "ARM64 clang:"
+          echo "========== ARM64 clang =========="
           "$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" --version
 
-          echo "libclang:"
-          ls -la "$LIBCLANG_PATH"/libclang*.so*
+          echo "========== NDK libclang =========="
+          ls -la "$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/lib/libclang.so"
+          ls -la "$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/lib64/libclang.so"
 
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_ROOT }}
