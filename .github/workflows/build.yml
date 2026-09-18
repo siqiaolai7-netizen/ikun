@@ -47,11 +47,7 @@ jobs:
 
           mkdir -p core
 
-          # Always remove the bundled/old Clash.Meta.
-          # We need the current FlClash branch.
           rm -rf core/Clash.Meta
-
-          echo "Downloading Clash.Meta FlClash branch..."
 
           git clone \
             --depth 1 \
@@ -66,25 +62,25 @@ jobs:
           test -f core/Clash.Meta/go.sum
 
           echo ""
-          echo "Clash.Meta restored successfully."
-
-          echo ""
           echo "Clash.Meta commit:"
 
           cd core/Clash.Meta
 
           git rev-parse HEAD
 
+          echo ""
+          echo "Clash.Meta restored successfully."
+
       # =========================================================
-      # 4. Prepare Clash.Meta Go dependencies
+      # 4. Fix Clash.Meta Go dependencies
       # =========================================================
-      - name: Prepare Clash.Meta Go dependencies
+      - name: Fix Clash.Meta Go dependencies
         working-directory: ${{ env.PROJECT_ROOT }}/core/Clash.Meta
         run: |
           set -e
 
           echo "======================================"
-          echo "Preparing Clash.Meta Go dependencies"
+          echo "Fixing Clash.Meta Go dependencies"
           echo "======================================"
 
           echo ""
@@ -92,21 +88,24 @@ jobs:
           go version
 
           echo ""
-          echo "sing-shadowtls dependency from go.mod:"
-
+          echo "Original sing-shadowtls entry:"
           grep \
             "github.com/metacubex/sing-shadowtls" \
-            go.mod
+            go.mod || true
 
           echo ""
-          echo "sing-shadowtls checksum from go.sum:"
+          echo "Adding correct sing-shadowtls version..."
 
-          grep \
-            "github.com/metacubex/sing-shadowtls" \
-            go.sum
+          go get \
+            github.com/metacubex/sing-shadowtls@v0.0.0-20260517015314-c11c36474edc
 
           echo ""
-          echo "Downloading Go modules..."
+          echo "Running go mod tidy..."
+
+          go mod tidy
+
+          echo ""
+          echo "Downloading all Go modules..."
 
           go mod download
 
@@ -116,7 +115,21 @@ jobs:
           go mod verify
 
           echo ""
-          echo "Go dependencies are ready."
+          echo "Checking sing-shadowtls in go.mod..."
+
+          grep \
+            "github.com/metacubex/sing-shadowtls" \
+            go.mod
+
+          echo ""
+          echo "Checking sing-shadowtls in go.sum..."
+
+          grep \
+            "github.com/metacubex/sing-shadowtls" \
+            go.sum
+
+          echo ""
+          echo "Go dependency preparation completed."
 
       # =========================================================
       # 5. Fix source package name
@@ -316,9 +329,6 @@ jobs:
 
           test -d "$NDK_LLVM"
 
-          echo ""
-          echo "Creating NDK lib directories..."
-
           sudo mkdir -p "$NDK_LLVM/lib"
           sudo mkdir -p "$NDK_LLVM/lib64"
 
@@ -381,17 +391,8 @@ jobs:
 
           NDK_LLVM="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64"
 
-          echo "Checking:"
-          echo "$NDK_LLVM"
-
           test -e "$NDK_LLVM/lib/libclang.so"
           test -e "$NDK_LLVM/lib64/libclang.so"
-
-          echo ""
-          echo "libclang in NDK:"
-
-          ls -la "$NDK_LLVM/lib"/libclang*
-          ls -la "$NDK_LLVM/lib64"/libclang*
 
           echo ""
           echo "Rust libclang check passed."
@@ -510,54 +511,43 @@ jobs:
 
           echo ""
           echo "======================================"
-          echo "ARM64 clang"
-          echo "======================================"
-
-          "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" \
-            --version
-
-          echo ""
-          echo "======================================"
-          echo "NDK libclang"
-          echo "======================================"
-
-          NDK_LLVM="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64"
-
-          test -e "$NDK_LLVM/lib/libclang.so"
-          test -e "$NDK_LLVM/lib64/libclang.so"
-
-          ls -la "$NDK_LLVM/lib"/libclang*
-          ls -la "$NDK_LLVM/lib64"/libclang*
-
-          echo ""
-          echo "======================================"
           echo "Clash.Meta"
           echo "======================================"
 
-          test -f \
-            "${GITHUB_WORKSPACE}/source/core/Clash.Meta/go.mod"
+          CLASH_DIR="${GITHUB_WORKSPACE}/source/core/Clash.Meta"
 
-          test -f \
-            "${GITHUB_WORKSPACE}/source/core/Clash.Meta/go.sum"
+          test -f "$CLASH_DIR/go.mod"
+          test -f "$CLASH_DIR/go.sum"
 
-          echo "Clash.Meta go.mod exists."
-          echo "Clash.Meta go.sum exists."
+          echo "go.mod exists."
+          echo "go.sum exists."
 
           echo ""
-          echo "======================================"
-          echo "sing-shadowtls"
-          echo "======================================"
+          echo "sing-shadowtls in go.mod:"
 
           grep -n \
             "github.com/metacubex/sing-shadowtls" \
-            "${GITHUB_WORKSPACE}/source/core/Clash.Meta/go.mod"
+            "$CLASH_DIR/go.mod"
+
+          echo ""
+          echo "sing-shadowtls in go.sum:"
 
           grep -n \
             "github.com/metacubex/sing-shadowtls" \
-            "${GITHUB_WORKSPACE}/source/core/Clash.Meta/go.sum"
+            "$CLASH_DIR/go.sum"
+
+          echo ""
+          echo "Go dependency verification:"
+
+          cd "$CLASH_DIR"
+
+          go mod verify
+
+          echo ""
+          echo "Clash.Meta dependency check passed."
 
       # =========================================================
-      # 16. Install dependencies
+      # 16. Install Flutter dependencies
       # =========================================================
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -575,6 +565,10 @@ jobs:
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
           set -e
+
+          echo "======================================"
+          echo "Building IKUN Clash ARM64 APK"
+          echo "======================================"
 
           flutter build apk \
             --release \
