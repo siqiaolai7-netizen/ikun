@@ -20,7 +20,7 @@ jobs:
       - name: Fix pubspec SDK constraint
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          sed -i "s#sdk: '>=3.10.0 <4.0.0'#sdk: '>=3.10.0-0 <4.0.0'#" pubspec.yaml
+          sed -i "s#sdk: '>=3.10.0 <4.0.0'#sdk: '>=3.12.0 <4.0.0'#" pubspec.yaml
           sed -i "s#path_provider_platform_interface: ^2.1.3#path_provider_platform_interface: ^2.1.2#" pubspec.yaml
           cat pubspec.yaml
 
@@ -33,7 +33,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.38.0'
+          flutter-version: '3.40.0'
           channel: stable
           cache: true
 
