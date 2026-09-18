@@ -15,19 +15,19 @@ jobs:
 
       - name: Extract source
         run: |
-          unzip -q IKUN-Clash-final-source.zip -d source
+          unzip -q IKUN-Clash-Final-source.zip -d source
           echo "PROJECT_ROOT=$PWD/source" >> $GITHUB_ENV
 
       - name: Install Java
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
+          distribution: 'temurin'
           java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.38.0'
+          flutter-version: '3.28.0'
           channel: stable
           cache: true
 
@@ -37,11 +37,12 @@ jobs:
           dart --version
 
       - name: Setup Android SDK
-        run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platform-tools"
-          sdkmanager "platforms;android-35"
-          sdkmanager "build-tools;35.0.0"
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Accept Android Licenses
+        run: yes | sdkmanager --licenses || true
 
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -62,6 +63,6 @@ jobs:
 
       - name: Finish
         run: |
-          echo "===================================="
+          echo "======================================"
           echo "ARM64 APK BUILD FINISHED"
-          echo "===================================="
+          echo "======================================"
