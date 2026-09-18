@@ -32,7 +32,6 @@ jobs:
           echo "PROJECT_ROOT=$PWD/source" >> "$GITHUB_ENV"
 
           echo "Source extracted successfully."
-          ls -la source
 
       # =========================================================
       # 3. Restore Clash.Meta
@@ -63,16 +62,8 @@ jobs:
               core/Clash.Meta
           fi
 
-          echo ""
-          echo "Clash.Meta directory:"
-          ls -la core/Clash.Meta
-
-          echo ""
-          echo "Checking go.mod..."
-
           test -f core/Clash.Meta/go.mod
 
-          echo ""
           echo "Clash.Meta restored successfully."
 
       # =========================================================
@@ -113,15 +104,11 @@ jobs:
         run: |
           set -e
 
-          echo "Current SDK constraint:"
-          grep -n "sdk:" pubspec.yaml || true
-
           sed -i \
             's/>=3\.12\.0 <4\.0\.0/>=3.13.0 <4.0.0/g' \
             pubspec.yaml
 
-          echo ""
-          echo "New SDK constraint:"
+          echo "SDK constraint:"
           grep -n "sdk:" pubspec.yaml || true
 
       # =========================================================
@@ -150,9 +137,7 @@ jobs:
         run: |
           set -e
 
-          echo "======================================"
-          echo "Finding sdkmanager"
-          echo "======================================"
+          echo "Finding sdkmanager..."
 
           SDKMANAGER=$(find "$ANDROID_SDK_ROOT" \
             -type f \
@@ -166,18 +151,12 @@ jobs:
 
           echo "sdkmanager: $SDKMANAGER"
 
-          echo ""
-          echo "======================================"
-          echo "Accept Android licenses"
-          echo "======================================"
+          echo "Accepting Android licenses..."
 
           yes | bash "$SDKMANAGER" --licenses \
             >/dev/null 2>&1 || true
 
-          echo ""
-          echo "======================================"
-          echo "Install NDK 27.3.13750724"
-          echo "======================================"
+          echo "Installing NDK 27.3.13750724..."
 
           bash "$SDKMANAGER" \
             "ndk;27.3.13750724"
@@ -189,13 +168,11 @@ jobs:
           echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"
 
           echo ""
-          echo "NDK path:"
+          echo "NDK:"
           echo "$NDK_PATH"
 
           echo ""
-          echo "======================================"
-          echo "Checking ARM64 compiler"
-          echo "======================================"
+          echo "Checking ARM64 compiler..."
 
           test -f \
             "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
@@ -203,18 +180,17 @@ jobs:
           "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" \
             --version
 
-          echo ""
-          echo "NDK setup completed successfully."
+          echo "NDK setup completed."
 
       # =========================================================
-      # 9. Setup libclang
+      # 9. Install system libclang
       # =========================================================
       - name: Setup libclang
         run: |
           set -e
 
           echo "======================================"
-          echo "Installing clang and libclang"
+          echo "Installing libclang"
           echo "======================================"
 
           sudo apt-get update
@@ -225,38 +201,15 @@ jobs:
             libclang-18-dev
 
           echo ""
-          echo "Searching libclang..."
+          echo "Searching system libclang..."
 
-          LLVM_DIR=""
-
-          if [ -d "/usr/lib/llvm-18/lib" ]; then
-            LLVM_DIR="/usr/lib/llvm-18/lib"
-          elif [ -d "/usr/lib/llvm-18/lib64" ]; then
-            LLVM_DIR="/usr/lib/llvm-18/lib64"
-          fi
-
-          if [ -z "$LLVM_DIR" ]; then
-            LLVM_DIR=$(find /usr/lib \
-              -type d \
-              -path "*/llvm-*/lib" \
-              | head -n 1)
-          fi
-
-          if [ -z "$LLVM_DIR" ]; then
-            echo "ERROR: LLVM directory not found."
-            exit 1
-          fi
-
-          echo "LLVM_DIR=$LLVM_DIR"
-
-          LIBCLANG_FILE=$(find "$LLVM_DIR" \
-            -maxdepth 2 \
+          LIBCLANG_FILE=$(find /usr/lib \
             -type f \
-            -name "libclang*.so*" \
+            -name "libclang.so*" \
             | head -n 1)
 
           if [ -z "$LIBCLANG_FILE" ]; then
-            echo "ERROR: libclang not found."
+            echo "ERROR: system libclang not found."
 
             find /usr/lib \
               -name "libclang*.so*" \
@@ -265,60 +218,124 @@ jobs:
             exit 1
           fi
 
-          LIBCLANG_PATH="$LLVM_DIR"
+          echo "System libclang:"
+          echo "$LIBCLANG_FILE"
 
-          echo "LIBCLANG_PATH=$LIBCLANG_PATH" >> "$GITHUB_ENV"
+          LLVM_DIR=$(dirname "$LIBCLANG_FILE")
 
-          echo "LD_LIBRARY_PATH=$LIBCLANG_PATH:${LD_LIBRARY_PATH:-}" \
+          echo "LLVM_DIR=$LLVM_DIR"
+
+          echo "LIBCLANG_PATH=$LLVM_DIR" >> "$GITHUB_ENV"
+
+          echo "LD_LIBRARY_PATH=$LLVM_DIR:${LD_LIBRARY_PATH:-}" \
             >> "$GITHUB_ENV"
 
-          if [ ! -e "$LIBCLANG_PATH/libclang.so" ]; then
+          if [ ! -e "$LLVM_DIR/libclang.so" ]; then
             sudo ln -sf \
               "$LIBCLANG_FILE" \
-              "$LIBCLANG_PATH/libclang.so"
+              "$LLVM_DIR/libclang.so"
           fi
 
           echo ""
-          echo "libclang files:"
-          ls -la "$LIBCLANG_PATH"/libclang*
-
-          echo ""
-          echo "libclang setup completed."
+          echo "System libclang installed."
 
       # =========================================================
-      # 10. Check Rust libclang
+      # 10. Put libclang inside Android NDK
+      # =========================================================
+      - name: Install libclang into NDK
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "Installing libclang into NDK"
+          echo "======================================"
+
+          NDK_LLVM="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64"
+
+          echo "NDK LLVM:"
+          echo "$NDK_LLVM"
+
+          test -d "$NDK_LLVM"
+
+          echo ""
+          echo "Creating NDK lib directories..."
+
+          sudo mkdir -p "$NDK_LLVM/lib"
+          sudo mkdir -p "$NDK_LLVM/lib64"
+
+          echo ""
+          echo "Locating system libclang..."
+
+          SYSTEM_LIBCLANG=$(find /usr/lib \
+            -type f \
+            -name "libclang.so*" \
+            | head -n 1)
+
+          if [ -z "$SYSTEM_LIBCLANG" ]; then
+            echo "ERROR: Could not find system libclang."
+            exit 1
+          fi
+
+          echo "Using:"
+          echo "$SYSTEM_LIBCLANG"
+
+          echo ""
+          echo "Creating libclang.so links..."
+
+          sudo ln -sf \
+            "$SYSTEM_LIBCLANG" \
+            "$NDK_LLVM/lib/libclang.so"
+
+          sudo ln -sf \
+            "$SYSTEM_LIBCLANG" \
+            "$NDK_LLVM/lib64/libclang.so"
+
+          echo ""
+          echo "Checking NDK lib..."
+
+          ls -la "$NDK_LLVM/lib"/libclang*
+
+          echo ""
+          echo "Checking NDK lib64..."
+
+          ls -la "$NDK_LLVM/lib64"/libclang*
+
+          test -e "$NDK_LLVM/lib/libclang.so"
+          test -e "$NDK_LLVM/lib64/libclang.so"
+
+          echo ""
+          echo "NDK libclang setup completed."
+
+      # =========================================================
+      # 11. Check Rust libclang
       # =========================================================
       - name: Check Rust libclang
         run: |
           set -e
 
-          echo "LIBCLANG_PATH=$LIBCLANG_PATH"
+          NDK_LLVM="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64"
 
-          test -f "$LIBCLANG_PATH/libclang.so"
+          echo "Checking:"
+          echo "$NDK_LLVM"
 
-          ls -la "$LIBCLANG_PATH"/libclang*
+          test -e "$NDK_LLVM/lib/libclang.so"
+          test -e "$NDK_LLVM/lib64/libclang.so"
+
+          echo ""
+          echo "libclang in NDK:"
+          ls -la "$NDK_LLVM/lib"/libclang*
+          ls -la "$NDK_LLVM/lib64"/libclang*
 
           echo ""
           echo "Rust libclang check passed."
 
       # =========================================================
-      # 11. Force NDK version
+      # 12. Force NDK version
       # =========================================================
       - name: Force NDK version
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
           set -e
-
-          echo "Searching Gradle files..."
-
-          find android \
-            -type f \
-            \( \
-              -name "build.gradle" \
-              -o \
-              -name "build.gradle.kts" \
-            \) \
-            -print || true
 
           if [ -d android ]; then
 
@@ -336,11 +353,11 @@ jobs:
 
           fi
 
-          echo ""
-          echo "NDK version replacement completed."
+          echo "NDK version:"
+          echo "27.3.13750724"
 
       # =========================================================
-      # 12. Fix missing IkunBanner
+      # 13. Fix missing IkunBanner
       # =========================================================
       - name: Fix missing IkunBanner
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -354,12 +371,7 @@ jobs:
             exit 1
           fi
 
-          echo "Searching for IkunBanner..."
-
-          grep -n "IkunBanner" "$FILE" || true
-
-          echo ""
-          echo "Replacing missing IkunBanner with SizedBox.shrink..."
+          echo "Replacing missing IkunBanner..."
 
           python3 <<'PY'
           from pathlib import Path
@@ -375,22 +387,22 @@ jobs:
 
           print(f"Found {count} IkunBanner reference(s).")
 
-          if count == 0:
-              print("IkunBanner reference not found.")
-          else:
+          if count:
               text = text.replace(old, new)
               file.write_text(text)
-              print("IkunBanner replacement completed.")
+              print("IkunBanner replaced.")
+          else:
+              print("IkunBanner reference not found.")
+
           PY
 
           echo ""
-          echo "Checking result..."
+          echo "Checking replacement..."
 
-          grep -n "IkunBanner" "$FILE" || true
           grep -n "SizedBox.shrink" "$FILE" || true
 
       # =========================================================
-      # 13. Check build environment
+      # 14. Check build environment
       # =========================================================
       - name: Check build environment
         run: |
@@ -433,10 +445,16 @@ jobs:
 
           echo ""
           echo "======================================"
-          echo "libclang"
+          echo "NDK libclang"
           echo "======================================"
 
-          ls -la "$LIBCLANG_PATH"/libclang*
+          NDK_LLVM="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64"
+
+          test -e "$NDK_LLVM/lib/libclang.so"
+          test -e "$NDK_LLVM/lib64/libclang.so"
+
+          ls -la "$NDK_LLVM/lib"/libclang*
+          ls -la "$NDK_LLVM/lib64"/libclang*
 
           echo ""
           echo "======================================"
@@ -449,7 +467,7 @@ jobs:
           echo "Clash.Meta go.mod exists."
 
       # =========================================================
-      # 14. Install dependencies
+      # 15. Install dependencies
       # =========================================================
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -461,7 +479,7 @@ jobs:
           flutter pub get
 
       # =========================================================
-      # 15. Build ARM64 APK
+      # 16. Build ARM64 APK
       # =========================================================
       - name: Build ARM64 APK
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -474,7 +492,7 @@ jobs:
             --verbose
 
       # =========================================================
-      # 16. Upload APK
+      # 17. Upload APK
       # =========================================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -484,13 +502,14 @@ jobs:
           if-no-files-found: error
 
       # =========================================================
-      # 17. Finish
+      # 18. Finish
       # =========================================================
       - name: Finish
         run: |
           echo "======================================"
           echo "IKUN Clash ARM64 APK BUILD DONE"
           echo "======================================"
+
           echo ""
           echo "APK:"
           echo "${GITHUB_WORKSPACE}/source/build/app/outputs/flutter-apk/app-release.apk"
