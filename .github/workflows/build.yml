@@ -30,10 +30,14 @@ jobs:
               xargs -0 sed -i 's/package:fl_clash\//package:ikun_clash\//g' || true
           fi
 
+          echo "Package references fixed."
+
       - name: Fix Dart SDK constraint
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
           sed -i 's/>=3\.12\.0 <4\.0\.0/>=3.13.0 <4.0.0/g' pubspec.yaml
+
+          echo "Dart SDK constraint:"
           grep -n "sdk:" pubspec.yaml || true
 
       - name: Install Java
@@ -71,13 +75,16 @@ jobs:
           echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"
 
+          echo "Checking ARM64 clang..."
+
           if [ ! -x "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" ]; then
             echo "Required ARM64 clang not found"
             exit 1
           fi
 
-          echo "NDK setup OK"
           "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" --version
+
+          echo "NDK setup OK."
 
       - name: Setup libclang
         run: |
@@ -120,22 +127,35 @@ jobs:
           echo "LIBCLANG_PATH=$LLVM_DIR" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$LLVM_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
 
+          echo "libclang setup OK."
           ls -la "$LLVM_DIR"/libclang*.so*
 
       - name: Check Rust libclang
         run: |
           echo "LIBCLANG_PATH=$LIBCLANG_PATH"
-          ls -la "$LIBCLANG_PATH"
-          find "$LIBCLANG_PATH" -maxdepth 1 -name "libclang*.so*" -print
+
+          if [ ! -f "$LIBCLANG_PATH/libclang.so" ]; then
+            echo "libclang.so not found"
+            exit 1
+          fi
+
+          ls -la "$LIBCLANG_PATH"/libclang*.so*
+
+          echo "Rust libclang check OK."
 
       - name: Force NDK version
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          find . -type f -name "build.gradle" -o -name "build.gradle.kts" -print0 | \
-            xargs -0 sed -i -E \
-            's/ndkVersion[[:space:]]*[=:][[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion = "27.3.13750724"/g' || true
+          if [ -f android/app/build.gradle ]; then
+            sed -i -E 's/ndkVersion[[:space:]]*[=:][[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion = "27.3.13750724"/g' android/app/build.gradle
+          fi
 
-          grep -R "ndkVersion" android plugins 2>/dev/null || true
+          if [ -f android/app/build.gradle.kts ]; then
+            sed -i -E 's/ndkVersion[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion = "27.3.13750724"/g' android/app/build.gradle.kts
+          fi
+
+          echo "NDK configuration:"
+          grep -R "ndkVersion" android 2>/dev/null || true
 
       - name: Fix dashboard const error
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -148,69 +168,35 @@ jobs:
           fi
 
           echo "Before patch:"
-          nl -ba "$FILE" | sed -n '195,225p'
+          nl -ba "$FILE" | sed -n '205,218p'
 
-          python3 <<'PY'
-          from pathlib import Path
-          import re
-
-          file = Path("lib/views/dashboard/dashboard.dart")
-          lines = file.read_text().splitlines()
-
-          target = None
-
-          for i, line in enumerate(lines):
-              if "child: IkunBanner()," in line:
-                  target = i
-                  break
-
-          if target is None:
-              print("IkunBanner line not found - nothing to patch")
-              raise SystemExit(0)
-
-          print(f"Found IkunBanner at line {target + 1}")
-
-          # 找到包住 IkunBanner 的最近 const 构造器并移除 const
-          patch_line = None
-
-          for j in range(target - 1, max(-1, target - 50), -1):
-              line
-              if patch_line is None:
-              print("Could not find enclosing const constructor")
-              print("\n".join(
-                  f"{i+1}: {lines[i]}"
-                  for i in range(max(0, target-15), min(len(lines), target+5))
-              ))
-              raise SystemExit(1)
-
-          old = lines[patch_line]
-          lines[patch_line] = re.sub(r"\bconst\s+", "", lines[patch_line], count=1)
-
-          print(f"Patched line {patch_line + 1}:")
-          print("OLD:", old)
-          print("NEW:", lines[patch_line])
-
-          file.write_text("\n".join(lines) + "\n")
-          PY
+          sed -i 's/const GridItem(/GridItem(/g' "$FILE"
 
           echo "After patch:"
-          nl -ba "$FILE" | sed -n '195,225p'
+          nl -ba "$FILE" | sed -n '205,218p'
+
+          if grep -q "const GridItem(" "$FILE"; then
+            echo "const GridItem still exists"
+            exit 1
+          fi
+
+          echo "Dashboard const error fixed."
 
       - name: Check build environment
         run: |
-          echo "Flutter:"
+          echo "========== Flutter =========="
           flutter --version
 
-          echo "Dart:"
+          echo "========== Dart =========="
           dart --version
 
-          echo "NDK:"
+          echo "========== NDK =========="
           echo "$ANDROID_NDK_ROOT"
 
-          echo "ARM64 clang:"
+          echo "========== ARM64 clang =========="
           "$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" --version
 
-          echo "libclang:"
+          echo "========== libclang =========="
           ls -la "$LIBCLANG_PATH"/libclang*.so*
 
       - name: Install dependencies
