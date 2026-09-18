@@ -11,41 +11,131 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+      # =========================================================
+      # 1. Checkout
+      # =========================================================
       - name: Checkout
         uses: actions/checkout@v4
 
+      # =========================================================
+      # 2. Extract source
+      # =========================================================
       - name: Extract source
         run: |
+          set -e
+
+          rm -rf source
+
           unzip -q IKUN-Clash-final-source.zip -d source
+
           echo "PROJECT_ROOT=$PWD/source" >> "$GITHUB_ENV"
 
+          echo "Source extracted."
+          ls -la source
+
+      # =========================================================
+      # 3. Restore Clash.Meta
+      # =========================================================
+      - name: Restore Clash.Meta
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "Checking Clash.Meta"
+          echo "======================================"
+
+          mkdir -p core
+
+          if [ -f "core/Clash.Meta/go.mod" ]; then
+            echo "Clash.Meta already exists."
+          else
+            echo "Clash.Meta is missing."
+            echo "Downloading Clash.Meta..."
+
+            rm -rf core/Clash.Meta
+
+            git clone \
+              --depth 1 \
+              --branch FlClash \
+              https://github.com/chen08209/Clash.Meta.git \
+              core/Clash.Meta
+          fi
+
+          echo ""
+          echo "Clash.Meta directory:"
+          ls -la core/Clash.Meta
+
+          echo ""
+          echo "Checking go.mod..."
+
+          test -f core/Clash.Meta/go.mod
+
+          echo ""
+          echo "Clash.Meta restored successfully."
+
+      # =========================================================
+      # 4. Fix source package name
+      # =========================================================
       - name: Fix source package name
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          find lib -type f -name "*.dart" -print0 | \
-            xargs -0 sed -i 's/package:fl_clash\//package:ikun_clash\//g' || true
+          set -e
 
-          if [ -d plugins ]; then
-            find plugins -type f -name "*.dart" -print0 | \
-              xargs -0 sed -i 's/package:fl_clash\//package:ikun_clash\//g' || true
+          echo "Replacing package:fl_clash with package:ikun_clash..."
+
+          if [ -d lib ]; then
+            find lib \
+              -type f \
+              -name "*.dart" \
+              -print0 | \
+              xargs -0 sed -i \
+              's/package:fl_clash\//package:ikun_clash\//g'
           fi
 
-          echo "Package references fixed."
+          if [ -d plugins ]; then
+            find plugins \
+              -type f \
+              -name "*.dart" \
+              -print0 | \
+              xargs -0 sed -i \
+              's/package:fl_clash\//package:ikun_clash\//g'
+          fi
 
+          echo "Package name replacement completed."
+
+      # =========================================================
+      # 5. Fix Dart SDK constraint
+      # =========================================================
       - name: Fix Dart SDK constraint
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          sed -i 's/>=3\.12\.0 <4\.0\.0/>=3.13.0 <4.0.0/g' pubspec.yaml
+          set -e
 
-          echo "Dart SDK constraint:"
+          echo "Current SDK constraint:"
           grep -n "sdk:" pubspec.yaml || true
 
+          sed -i \
+            's/>=3\.12\.0 <4\.0\.0/>=3.13.0 <4.0.0/g' \
+            pubspec.yaml
+
+          echo ""
+          echo "New SDK constraint:"
+          grep -n "sdk:" pubspec.yaml || true
+
+      # =========================================================
+      # 6. Install Java
+      # =========================================================
       - name: Install Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
+      # =========================================================
+      # 7. Setup Flutter
+      # =========================================================
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -53,241 +143,373 @@ jobs:
           channel: stable
           cache: true
 
+      # =========================================================
+      # 8. Setup Android NDK
+      # =========================================================
       - name: Setup Android NDK
         run: |
+          set -e
+
           echo "Finding sdkmanager..."
 
-          SDKMANAGER=$(find "$ANDROID_SDK_ROOT" -type f -name "sdkmanager" | head -n 1)
+          SDKMANAGER=$(find "$ANDROID_SDK_ROOT" \
+            -type f \
+            -name "sdkmanager" \
+            | head -n 1)
 
           if [ -z "$SDKMANAGER" ]; then
-            echo "sdkmanager not found"
+            echo "ERROR: sdkmanager not found."
             exit 1
           fi
 
           echo "sdkmanager: $SDKMANAGER"
 
-          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          chmod +x "$SDKMANAGER"
 
-          "$SDKMANAGER" "ndk;27.3.13750724"
+          echo "Accepting Android licenses..."
+
+          yes | "$SDKMANAGER" --licenses \
+            >/dev/null 2>&1 || true
+
+          echo "Installing NDK 27.3.13750724..."
+
+          "$SDKMANAGER" \
+            "ndk;27.3.13750724"
 
           NDK_PATH="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
 
+          echo "ANDROID_NDK=$NDK_PATH" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"
 
-          CLANG="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
+          echo ""
+          echo "NDK:"
+          echo "$NDK_PATH"
 
-          if [ ! -x "$CLANG" ]; then
-            echo "ARM64 clang not found"
-            echo "$CLANG"
-            exit 1
-          fi
+          echo ""
+          echo "Checking ARM64 compiler..."
 
-          echo "ARM64 clang:"
-          "$CLANG" --version
+          test -f \
+            "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
 
-          echo "NDK setup OK."
+          "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" \
+            --version
 
+          echo ""
+          echo "NDK setup completed."
+
+      # =========================================================
+      # 9. Setup libclang
+      # =========================================================
       - name: Setup libclang
         run: |
+          set -e
+
+          echo "Installing clang and libclang..."
+
           sudo apt-get update
-          sudo apt-get install -y clang libclang-dev libclang-18-dev
 
-          NDK_LLVM="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64"
+          sudo apt-get install -y \
+            clang \
+            libclang-dev \
+            libclang-18-dev
 
-          echo "NDK LLVM:"
-          echo "$NDK_LLVM"
-
+          echo ""
           echo "Searching libclang..."
 
-          LIBCLANG_FILE=""
+          LLVM_DIR=""
 
-          if [ -e "/usr/lib/llvm-18/lib/libclang.so" ]; then
-            LIBCLANG_FILE="/usr/lib/llvm-18/lib/libclang.so"
-          else
-            LIBCLANG_FILE=$(find /usr/lib -name "libclang.so*" | head -n 1)
+          if [ -d "/usr/lib/llvm-18/lib" ]; then
+            LLVM_DIR="/usr/lib/llvm-18/lib"
+          elif [ -d "/usr/lib/llvm-18/lib64" ]; then
+            LLVM_DIR="/usr/lib/llvm-18/lib64"
           fi
 
-          if [ -z "$LIBCLANG_FILE" ] || [ ! -e "$LIBCLANG_FILE" ]; then
-            echo "libclang not found"
-            find /usr/lib -name "libclang.so*" -print || true
+          if [ -z "$LLVM_DIR" ]; then
+            LLVM_DIR=$(find /usr/lib \
+              -type d \
+              -path "*/llvm-*/lib" \
+              | head -n 1)
+          fi
+
+          if [ -z "$LLVM_DIR" ]; then
+            echo "ERROR: LLVM directory not found."
             exit 1
           fi
 
-          echo "Found libclang:"
-          echo "$LIBCLANG_FILE"
+          echo "LLVM_DIR=$LLVM_DIR"
 
-          mkdir -p "$NDK_LLVM/lib"
-          mkdir -p "$NDK_LLVM/lib64"
+          LIBCLANG_FILE=$(find "$LLVM_DIR" \
+            -maxdepth 2 \
+            -type f \
+            -name "libclang*.so*" \
+            | head -n 1)
 
-          sudo ln -sf "$LIBCLANG_FILE" "$NDK_LLVM/lib/libclang.so"
-          sudo ln -sf "$LIBCLANG_FILE" "$NDK_LLVM/lib64/libclang.so"
+          if [ -z "$LIBCLANG_FILE" ]; then
+            echo "ERROR: libclang not found."
+            find /usr/lib -name "libclang*.so*" -print || true
+            exit 1
+          fi
 
-          echo "LIBCLANG_PATH=$NDK_LLVM/lib" >> "$GITHUB_ENV"
+          LIBCLANG_PATH="$LLVM_DIR"
 
-          echo "LD_LIBRARY_PATH=$NDK_LLVM/lib:$NDK_LLVM/lib64:/usr/lib/llvm-18/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          echo "LIBCLANG_PATH=$LIBCLANG_PATH" >> "$GITHUB_ENV"
 
-          echo "========== NDK lib =========="
-          ls -la "$NDK_LLVM/lib"
+          echo "LD_LIBRARY_PATH=$LIBCLANG_PATH:${LD_LIBRARY_PATH:-}" \
+            >> "$GITHUB_ENV"
 
-          echo "========== NDK lib64 =========="
-          ls -la "$NDK_LLVM/lib64"
+          if [ ! -e "$LIBCLANG_PATH/libclang.so" ]; then
+            sudo ln -sf \
+              "$LIBCLANG_FILE" \
+              "$LIBCLANG_PATH/libclang.so"
+          fi
 
-          echo "libclang setup OK."
+          echo ""
+          echo "libclang file:"
+          ls -la "$LIBCLANG_PATH"/libclang*
 
+          echo ""
+          echo "libclang setup completed."
+
+      # =========================================================
+      # 10. Check Rust libclang
+      # =========================================================
       - name: Check Rust libclang
         run: |
-          NDK_LLVM="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64"
+          set -e
 
-          echo "Checking NDK libclang..."
+          echo "LIBCLANG_PATH=$LIBCLANG_PATH"
 
-          if [ ! -e "$NDK_LLVM/lib/libclang.so" ]; then
-            echo "NDK lib/libclang.so NOT FOUND"
-            exit 1
-          fi
+          test -f "$LIBCLANG_PATH/libclang.so"
 
-          if [ ! -e "$NDK_LLVM/lib64/libclang.so" ]; then
-            echo "NDK lib64/libclang.so NOT FOUND"
-            exit 1
-          fi
+          ls -la "$LIBCLANG_PATH"/libclang*
 
-          ls -la "$NDK_LLVM/lib/libclang.so"
-          ls -la "$NDK_LLVM/lib64/libclang.so"
+          echo ""
+          echo "Rust libclang check passed."
 
-          echo "Rust libclang check OK."
-
+      # =========================================================
+      # 11. Force NDK version
+      # =========================================================
       - name: Force NDK version
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
+          set -e
+
+          echo "Searching Gradle files..."
+
+          find android \
+            -type f \
+            \( -name "build.gradle" -o -name "build.gradle.kts" \) \
+            -print || true
+
+          if [ -d android ]; then
+
+            find android \
+              -type f \
+              \( -name "build.gradle" -o -name "build.gradle.kts" \) \
+              -print0 | \
+              xargs -0 sed -i \
+              -E 's/ndkVersion[[:space:]]*[=:][[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion = "27.3.13750724"/g' \
+              || true
+
+          fi
+
+          echo ""
+          echo "NDK version replacement completed."
+
+      # =========================================================
+      # 12. Fix dashboard const error
+      # =========================================================
+      - name: Fix dashboard const error
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: |
+          set -e
+
+          FILE="lib/views/dashboard/dashboard.dart"
+
+          if [ ! -f "$FILE" ]; then
+            echo "dashboard.dart not found."
+            exit 1
+          fi
+
+          echo "Searching IkunBanner..."
+
+          grep -n "IkunBanner" "$FILE" || true
+
           python3 <<'PY'
           from pathlib import Path
           import re
 
-          for file in [
-              Path("android/app/build.gradle"),
-              Path("android/app/build.gradle.kts"),
-          ]:
-              if not file.exists():
-                  continue
+          file = Path("lib/views/dashboard/dashboard.dart")
 
-              text = file.read_text()
+          lines = file.read_text().splitlines()
 
-              text = re.sub(
-                  r'ndkVersion\s*(?:=|:)?\s*["\'][^"\']+["\']',
-                  'ndkVersion = "27.3.13750724"',
-                  text
-              )
+          target = None
 
-              file.write_text(text)
-              print("Updated:", file)
+          for i, line in enumerate(lines):
+              if "child: IkunBanner()," in line:
+                  target = i
+                  break
+
+          if target is None:
+              print("IkunBanner line not found.")
+              raise SystemExit(0)
+
+          print(f"Found IkunBanner at line {target + 1}")
+
+          patch_line = None
+
+          # Search upward for the enclosing const constructor.
+          for j in range(target - 1, max(-1, target - 60), -1):
+
+              line = lines[j]
+
+              if "const " in line and "(" in line:
+                  patch_line = j
+                  break
+
+          if patch_line is None:
+              print("Could not find enclosing const constructor.")
+              print("Context:")
+
+              start = max(0, target - 15)
+              end = min(len(lines), target + 15)
+
+              for i in range(start, end):
+                  print(f"{i + 1}: {lines[i]}")
+
+              raise SystemExit(1)
+
+          old = lines[patch_line]
+
+          lines[patch_line] = re.sub(
+              r'\bconst\s+',
+              '',
+              lines[patch_line],
+              count=1
+          )
+
+          print("")
+          print("Patched const constructor:")
+          print(f"OLD: {old}")
+          print(f"NEW: {lines[patch_line]}")
+
+          file.write_text("\n".join(lines) + "\n")
           PY
 
-          echo "NDK configuration:"
-          grep -R "ndkVersion" android 2>/dev/null || true
+          echo ""
+          echo "Dashboard context after patch:"
+          nl -ba "$FILE" | sed -n '195,225p'
 
-      - name: Fix dashboard const error
-        working-directory: ${{ env.PROJECT_ROOT }}
-        run: |
-          FILE="lib/views/dashboard/dashboard.dart"
-
-          if [ ! -f "$FILE" ]; then
-            echo "dashboard.dart not found"
-            exit 1
-          fi
-
-          echo "Before patch:"
-          nl -ba "$FILE" | sed -n '205,218p'
-
-          sed -i 's/const GridItem(/GridItem(/g' "$FILE"
-
-          echo "After patch:"
-          nl -ba "$FILE" | sed -n '205,218p'
-
-          echo "Dashboard const fix OK."
-
+      # =========================================================
+      # 13. Fix IkunBanner definition if needed
+      # =========================================================
       - name: Fix IkunBanner
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          FILE="lib/views/dashboard/dashboard.dart"
+          set -e
 
-          if grep -q "class IkunBanner" "$FILE"; then
-            echo "IkunBanner already exists."
-            exit 0
-          fi
+          echo "Searching IkunBanner definition..."
 
-          python3 <<'PY'
-          from pathlib import Path
+          grep -R -n \
+            "class IkunBanner" \
+            lib plugins \
+            2>/dev/null || true
 
-          file = Path("lib/views/dashboard/dashboard.dart")
-          text = file.read_text()
+          echo ""
+          echo "IkunBanner references:"
+          grep -R -n \
+            "IkunBanner" \
+            lib plugins \
+            2>/dev/null | head -30 || true
 
-          if "class IkunBanner" in text:
-              print("IkunBanner already exists.")
-              raise SystemExit(0)
-
-          banner = r'''
-
-          class IkunBanner extends StatelessWidget {
-            const IkunBanner({super.key});
-
-            @override
-            Widget build(BuildContext context) {
-              return Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 14,
-                ),
-                child: const Text(
-                  'IKUN Clash',
-                  textAlign: TextAlign.center,
-                ),
-              );
-            }
-          }
-          '''
-
-          text = text.rstrip() + banner + "\n"
-          file.write_text(text)
-
-          print("IkunBanner fallback widget added.")
-          PY
-
-          echo "Checking IkunBanner:"
-          grep -n "class IkunBanner" "$FILE"
-
+      # =========================================================
+      # 14. Check build environment
+      # =========================================================
       - name: Check build environment
         run: |
-          echo "========== Flutter =========="
+          set -e
+
+          echo "======================================"
+          echo "Flutter"
+          echo "======================================"
+
           flutter --version
 
-          echo "========== Dart =========="
+          echo ""
+          echo "======================================"
+          echo "Dart"
+          echo "======================================"
+
           dart --version
 
-          echo "========== NDK =========="
-          echo "$ANDROID_NDK_ROOT"
+          echo ""
+          echo "======================================"
+          echo "Java"
+          echo "======================================"
 
-          echo "========== ARM64 clang =========="
-          "$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" --version
+          java -version
 
-          echo "========== NDK libclang =========="
-          ls -la "$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/lib/libclang.so"
-          ls -la "$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/lib64/libclang.so"
+          echo ""
+          echo "======================================"
+          echo "NDK"
+          echo "======================================"
 
+          echo "$ANDROID_NDK"
+
+          echo ""
+          echo "======================================"
+          echo "ARM64 clang"
+          echo "======================================"
+
+          "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" \
+            --version
+
+          echo ""
+          echo "======================================"
+          echo "libclang"
+          echo "======================================"
+
+          ls -la "$LIBCLANG_PATH"/libclang*
+
+          echo ""
+          echo "======================================"
+          echo "Clash.Meta"
+          echo "======================================"
+
+          test -f \
+            "${GITHUB_WORKSPACE}/source/core/Clash.Meta/go.mod"
+
+          echo "Clash.Meta go.mod exists."
+
+      # =========================================================
+      # 15. Install dependencies
+      # =========================================================
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
+          set -e
+
           flutter clean
+
           flutter pub get
 
+      # =========================================================
+      # 16. Build ARM64 APK
+      # =========================================================
       - name: Build ARM64 APK
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
+          set -e
+
           flutter build apk \
             --release \
             --target-platform android-arm64 \
             --verbose
 
+      # =========================================================
+      # 17. Upload APK
+      # =========================================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
@@ -295,8 +517,11 @@ jobs:
           path: ${{ env.PROJECT_ROOT }}/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
 
+      # =========================================================
+      # 18. Finish
+      # =========================================================
       - name: Finish
         run: |
-          echo "================================="
+          echo "======================================"
           echo "IKUN Clash ARM64 APK BUILD DONE"
-          echo "================================="
+          echo "======================================"
