@@ -10,18 +10,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ==============================
+      # 1. Checkout
+      # ==============================
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ==============================
+      # 2. 解压源码
+      # ==============================
       - name: Extract source
         run: |
           unzip -q IKUN-Clash-final-source.zip -d source
           echo "PROJECT_ROOT=$PWD/source" >> "$GITHUB_ENV"
 
+      # ==============================
+      # 3. 修复 package 名称
+      # ==============================
       - name: Fix source package name
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          echo "===== 修复 package 名称 ====="
+          echo "===== 修复 package:fl_clash ====="
 
           find lib -type f -name "*.dart" -print0 | \
             xargs -0 sed -i 's/package:fl_clash\//package:ikun_clash\//g' || true
@@ -31,18 +40,27 @@ jobs:
               xargs -0 sed -i 's/package:fl_clash\//package:ikun_clash\//g' || true
           fi
 
+      # ==============================
+      # 4. 修复 Dart SDK
+      # ==============================
       - name: Fix Dart SDK constraint
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
           sed -i 's/sdk: ">=3.12.0 <4.0.0"/sdk: ">=3.13.0 <4.0.0"/g' pubspec.yaml
           sed -i "s/sdk: '>=3.12.0 <4.0.0'/sdk: '>=3.13.0 <4.0.0'/g" pubspec.yaml
 
+      # ==============================
+      # 5. Java 17
+      # ==============================
       - name: Install Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
+      # ==============================
+      # 6. Flutter 3.47.2
+      # ==============================
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -50,6 +68,9 @@ jobs:
           channel: stable
           cache: true
 
+      # ==============================
+      # 7. 安装 NDK 27.3
+      # ==============================
       - name: Setup Android NDK
         run: |
           echo "===== 查找 sdkmanager ====="
@@ -68,38 +89,88 @@ jobs:
 
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
 
-          echo "===== 安装 NDK 26.3.11579264 ====="
+          echo "===== 安装 NDK 27.3.13750724 ====="
 
-          "$SDKMANAGER" "ndk;26.3.11579264"
+          "$SDKMANAGER" "ndk;27.3.13750724"
 
-          NDK_PATH="$ANDROID_SDK_ROOT/ndk/26.3.11579264"
+          NDK_PATH="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
 
           echo "ANDROID_NDK=$NDK_PATH" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"
 
-          echo "===== 当前 NDK ====="
+          echo "===== NDK 路径 ====="
           echo "$NDK_PATH"
 
           echo "===== 检查 clang ====="
           "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --version
 
-          echo "===== 检查 libclang ====="
-          ls -la "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
+          echo "===== 检查 API 35 clang ====="
 
+          if [ -f "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" ]; then
+            echo "API 35 clang 存在"
+          else
+            echo "API 35 clang 不存在"
+            exit 1
+          fi
+
+      # ==============================
+      # 8. 修复 libclang 路径
+      # ==============================
+      - name: Fix libclang path
+        run: |
+          NDK_PATH="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          LLVM_PATH="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64"
+
+          echo "===== 检查 libclang ====="
+
+          find "$LLVM_PATH" \
+            -maxdepth 3 \
+            -name "libclang.so*" \
+            -print || true
+
+          if [ -f "$LLVM_PATH/lib64/libclang.so" ]; then
+            echo "发现 lib64/libclang.so"
+
+            mkdir -p "$LLVM_PATH/lib"
+
+            ln -sf "$LLVM_PATH/lib64/libclang.so" \
+              "$LLVM_PATH/lib/libclang.so"
+
+          elif [ -f "$LLVM_PATH/lib/libclang.so" ]; then
+            echo "发现 lib/libclang.so"
+
+          else
+            echo "NDK 中找不到 libclang.so"
+
+            find "$LLVM_PATH" \
+              -name "libclang.so*" \
+              -print
+
+            exit 1
+          fi
+
+          echo "===== 最终 libclang ====="
+
+          ls -la "$LLVM_PATH/lib" || true
+          ls -la "$LLVM_PATH/lib64" || true
+
+      # ==============================
+      # 9. 强制 NDK 27.3
+      # ==============================
       - name: Force NDK version
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          echo "===== 固定 Gradle NDK 版本 ====="
+          echo "===== 固定 NDK 27.3 ====="
 
           if [ -f android/app/build.gradle ]; then
 
             sed -i -E \
-              's/ndkVersion[[:space:]]*=?[[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion "26.3.11579264"/g' \
+              's/ndkVersion[[:space:]]*=?[[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion "27.3.13750724"/g' \
               android/app/build.gradle
 
             sed -i \
-              's/ndkVersion flutter\.ndkVersion/ndkVersion "26.3.11579264"/g' \
+              's/ndkVersion flutter\.ndkVersion/ndkVersion "27.3.13750724"/g' \
               android/app/build.gradle
 
           fi
@@ -107,41 +178,53 @@ jobs:
           if [ -f android/app/build.gradle.kts ]; then
 
             sed -i -E \
-              's/ndkVersion[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion = "26.3.11579264"/g' \
+              's/ndkVersion[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion = "27.3.13750724"/g' \
               android/app/build.gradle.kts
 
             sed -i \
-              's/ndkVersion = flutter\.ndkVersion/ndkVersion = "26.3.11579264"/g' \
+              's/ndkVersion = flutter\.ndkVersion/ndkVersion = "27.3.13750724"/g' \
               android/app/build.gradle.kts
 
           fi
-
-          echo "===== NDK 配置 ====="
 
           grep -R "ndkVersion" android \
             --include="*.gradle" \
             --include="*.gradle.kts" \
             || true
 
-      - name: Check NDK environment
+      # ==============================
+      # 10. 检查环境
+      # ==============================
+      - name: Check build environment
         run: |
           echo "ANDROID_NDK=$ANDROID_NDK"
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
           echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
 
-          test "$ANDROID_NDK" = "$ANDROID_NDK_HOME"
+          "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --version
 
+          "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" --version
+
+      # ==============================
+      # 11. Flutter / Dart
+      # ==============================
       - name: Check Flutter version
         run: |
           flutter --version
           dart --version
 
+      # ==============================
+      # 12. 依赖
+      # ==============================
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
           flutter clean
           flutter pub get
 
+      # ==============================
+      # 13. 构建 ARM64 APK
+      # ==============================
       - name: Build ARM64 APK
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
@@ -150,12 +233,18 @@ jobs:
             --target-platform android-arm64 \
             --verbose
 
+      # ==============================
+      # 14. 上传 APK
+      # ==============================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: IKUN-Clash-ARM64
           path: ${{ env.PROJECT_ROOT }}/build/app/outputs/flutter-apk/app-release.apk
 
+      # ==============================
+      # 15. 完成
+      # ==============================
       - name: Finish
         run: |
           echo "======================================"
