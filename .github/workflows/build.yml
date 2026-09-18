@@ -10,36 +10,69 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ==============================
+      # 1. 获取代码
+      # ==============================
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ==============================
+      # 2. 解压 Flutter 源码
+      # ==============================
       - name: Extract source
         run: |
           unzip -q IKUN-Clash-final-source.zip -d source
-          echo "PROJECT_ROOT=$PWD/source" >> $GITHUB_ENV
+          echo "PROJECT_ROOT=$PWD/source" >> "$GITHUB_ENV"
 
+      # ==============================
+      # 3. 修复 package 名称
+      # ==============================
       - name: Fix source package name
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          echo "===== 修复 package 名称 ====="
+          echo "===== 修复 package:fl_clash ====="
+
           find lib -type f -name "*.dart" -print0 | \
             xargs -0 sed -i 's/package:fl_clash\//package:ikun_clash\//g' || true
 
-          find plugins -type f -name "*.dart" -print0 | \
-            xargs -0 sed -i 's/package:fl_clash\//package:ikun_clash\//g' || true
+          if [ -d plugins ]; then
+            find plugins -type f -name "*.dart" -print0 | \
+              xargs -0 sed -i 's/package:fl_clash\//package:ikun_clash\//g' || true
+          fi
 
+          echo "===== 检查剩余 fl_clash 引用 ====="
+
+          grep -R "package:fl_clash/" lib plugins \
+            --include="*.dart" \
+            | head -20 || true
+
+      # ==============================
+      # 4. 修复 Dart SDK 版本
+      # ==============================
       - name: Fix Dart SDK constraint
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
+          echo "===== 修复 Dart SDK 版本 ====="
+
           sed -i 's/sdk: ">=3.12.0 <4.0.0"/sdk: ">=3.13.0 <4.0.0"/g' pubspec.yaml
+
           sed -i "s/sdk: '>=3.12.0 <4.0.0'/sdk: '>=3.13.0 <4.0.0'/g" pubspec.yaml
 
+          echo "===== 当前 SDK 配置 ====="
+          grep -n "sdk:" pubspec.yaml || true
+
+      # ==============================
+      # 5. 安装 Java 17
+      # ==============================
       - name: Install Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
+      # ==============================
+      # 6. 安装 Flutter 3.47.2
+      # ==============================
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -47,28 +80,102 @@ jobs:
           channel: stable
           cache: true
 
+      # ==============================
+      # 7. 安装 Android NDK
+      # ==============================
       - name: Setup Android NDK
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "ndk;26.3.11579264"
+          echo "===== 查找 sdkmanager ====="
+
+          SDKMANAGER=$(find "$ANDROID_SDK_ROOT" \
+            -type f \
+            -name "sdkmanager" \
+            | head -n 1)
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "找不到 sdkmanager"
+            exit 1
+          fi
+
+          echo "sdkmanager: $SDKMANAGER"
+
+          echo "===== 安装 NDK 26.3.11579264 ====="
+
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+
+          "$SDKMANAGER" "ndk;26.3.11579264"
 
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
+
           echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/26.3.11579264" >> "$GITHUB_ENV"
 
-          echo "===== NDK ====="
+          echo "===== 检查 NDK ====="
+
+          ls -la "$ANDROID_SDK_ROOT/ndk/26.3.11579264"
+
+          echo "===== 检查 libclang ====="
+
           ls -la "$ANDROID_SDK_ROOT/ndk/26.3.11579264/toolchains/llvm/prebuilt/linux-x86_64"
 
+      # ==============================
+      # 8. 强制 Gradle 使用 NDK 26.3
+      # ==============================
+      - name: Force NDK version
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: |
+          echo "===== 固定 NDK 版本 ====="
+
+          if [ -f android/app/build.gradle ]; then
+
+            sed -i -E \
+              's/ndkVersion[[:space:]]*=?[[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion "26.3.11579264"/g' \
+              android/app/build.gradle
+
+            sed -i \
+              's/ndkVersion flutter\.ndkVersion/ndkVersion "26.3.11579264"/g' \
+              android/app/build.gradle
+
+          fi
+
+          if [ -f android/app/build.gradle.kts ]; then
+
+            sed -i -E \
+              's/ndkVersion[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion = "26.3.11579264"/g' \
+              android/app/build.gradle.kts
+
+            sed -i \
+              's/ndkVersion = flutter\.ndkVersion/ndkVersion = "26.3.11579264"/g' \
+              android/app/build.gradle.kts
+
+          fi
+
+          echo "===== 当前 NDK 配置 ====="
+
+          grep -R "ndkVersion" android \
+            --include="*.gradle" \
+            --include="*.gradle.kts" \
+            || true
+
+      # ==============================
+      # 9. 检查 Flutter / Dart
+      # ==============================
       - name: Check Flutter version
         run: |
           flutter --version
           dart --version
 
+      # ==============================
+      # 10. 安装依赖
+      # ==============================
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
           flutter clean
           flutter pub get
 
+      # ==============================
+      # 11. 构建 ARM64 APK
+      # ==============================
       - name: Build ARM64 APK
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
@@ -76,12 +183,18 @@ jobs:
             --release \
             --target-platform android-arm64
 
+      # ==============================
+      # 12. 上传 APK
+      # ==============================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: IKUN-Clash-ARM64
           path: ${{ env.PROJECT_ROOT }}/build/app/outputs/flutter-apk/app-release.apk
 
+      # ==============================
+      # 13. 完成
+      # ==============================
       - name: Finish
         run: |
           echo "======================================"
