@@ -11,7 +11,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -19,14 +18,10 @@ jobs:
         run: |
           unzip -q IKUN-Clash-final-source.zip -d source
           echo "PROJECT_ROOT=$PWD/source" >> "$GITHUB_ENV"
-          echo "===== PROJECT ROOT ====="
-          ls -la "$PWD/source"
 
       - name: Fix source package name
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          echo "===== 修复 package 名称 ====="
-
           find lib -type f -name "*.dart" -print0 | \
             xargs -0 sed -i 's/package:fl_clash\//package:ikun_clash\//g' || true
 
@@ -35,19 +30,11 @@ jobs:
               xargs -0 sed -i 's/package:fl_clash\//package:ikun_clash\//g' || true
           fi
 
-          echo "===== 检查剩余引用 ====="
-          grep -R "package:fl_clash/" . \
-            --include="*.dart" || true
-
       - name: Fix Dart SDK constraint
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          echo "===== 修复 Dart SDK ====="
-
-          sed -i 's/sdk: ">=3.12.0 <4.0.0"/sdk: ">=3.13.0 <4.0.0"/g' pubspec.yaml
-          sed -i "s/sdk: '>=3.12.0 <4.0.0'/sdk: '>=3.13.0 <4.0.0'/g" pubspec.yaml
-
-          grep -A5 "^environment:" pubspec.yaml || true
+          sed -i 's/>=3\.12\.0 <4\.0\.0/>=3.13.0 <4.0.0/g' pubspec.yaml
+          grep -n "sdk:" pubspec.yaml || true
 
       - name: Install Java
         uses: actions/setup-java@v5
@@ -64,185 +51,177 @@ jobs:
 
       - name: Setup Android NDK
         run: |
-          echo "===== 查找 sdkmanager ====="
+          echo "Finding sdkmanager..."
 
-          SDKMANAGER=$(find "$ANDROID_SDK_ROOT" \
-            -type f \
-            -name "sdkmanager" \
-            | head -n 1)
+          SDKMANAGER=$(find "$ANDROID_SDK_ROOT" -type f -name "sdkmanager" | head -n 1)
 
           if [ -z "$SDKMANAGER" ]; then
-            echo "找不到 sdkmanager"
+            echo "sdkmanager not found"
             exit 1
           fi
 
           echo "sdkmanager: $SDKMANAGER"
 
-          echo "===== 接受 Android licenses ====="
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
 
-          echo "===== 安装 NDK 27.3.13750724 ====="
           "$SDKMANAGER" "ndk;27.3.13750724"
 
           NDK_PATH="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
 
-          if [ ! -d "$NDK_PATH" ]; then
-            echo "NDK 安装失败"
-            exit 1
-          fi
-
-          echo "ANDROID_NDK=$NDK_PATH" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"
 
-          echo "===== 检查 clang ====="
-          "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --version
-
-          echo "===== 检查 ARM64 API 35 clang ====="
-
-          CLANG35="$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
-
-          if [ ! -f "$CLANG35" ]; then
-            echo "API 35 clang 不存在"
+          if [ ! -x "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" ]; then
+            echo "Required ARM64 clang not found"
             exit 1
           fi
 
-          echo "API 35 clang 存在"
-          "$CLANG35" --version
+          echo "NDK setup OK"
+          "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" --version
 
       - name: Setup libclang
         run: |
-          echo "===== 安装 libclang ====="
-
           sudo apt-get update
+          sudo apt-get install -y clang libclang-dev libclang-18-dev
 
-          sudo apt-get install -y \
-            clang \
-            libclang-dev \
-            libclang-18-dev
+          LLVM_DIR=""
 
-          echo "===== 查找 libclang ====="
+          if [ -d "/usr/lib/llvm-18/lib" ]; then
+            LLVM_DIR="/usr/lib/llvm-18/lib"
+          elif [ -d "/usr/lib/llvm-18/lib64" ]; then
+            LLVM_DIR="/usr/lib/llvm-18/lib64"
+          fi
 
-          LIBCLANG_FILE=$(find /usr/lib \
-            -type f \
-            -name "libclang*.so*" \
-            | head -n 1)
+          if [ -z "$LLVM_DIR" ]; then
+            LLVM_DIR=$(find /usr/lib -type d -path "*/llvm-*/lib" | head -n 1)
+          fi
 
-          if [ -z "$LIBCLANG_FILE" ]; then
-            echo "找不到 libclang"
-            find /usr/lib -iname "*clang*" -print | head -100
+          echo "LLVM_DIR=$LLVM_DIR"
+
+          if [ -z "$LLVM_DIR" ] || [ ! -d "$LLVM_DIR" ]; then
+            echo "LLVM directory not found"
             exit 1
           fi
 
-          echo "找到:"
-          echo "$LIBCLANG_FILE"
+          LIBCLANG_FILE=$(find "$LLVM_DIR" -maxdepth 2 -type f -name "libclang*.so*" | head -n 1)
 
-          LIBCLANG_DIR=$(dirname "$LIBCLANG_FILE")
+          if [ -z "$LIBCLANG_FILE" ]; then
+            echo "libclang file not found"
+            find /usr/lib -name "libclang*.so*" -print || true
+            exit 1
+          fi
 
-          echo "LIBCLANG_PATH=$LIBCLANG_DIR" >> "$GITHUB_ENV"
-          echo "LD_LIBRARY_PATH=$LIBCLANG_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          echo "LIBCLANG_FILE=$LIBCLANG_FILE"
 
-          echo "===== LIBCLANG_PATH ====="
-          echo "$LIBCLANG_DIR"
+          if [ ! -e "$LLVM_DIR/libclang.so" ]; then
+            sudo ln -sf "$LIBCLANG_FILE" "$LLVM_DIR/libclang.so"
+          fi
 
-          echo "===== 检查 libclang ====="
-          ls -la "$LIBCLANG_DIR"
+          echo "LIBCLANG_PATH=$LLVM_DIR" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$LLVM_DIR:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+          ls -la "$LLVM_DIR"/libclang*.so*
 
       - name: Check Rust libclang
         run: |
-          echo "===== LIBCLANG_PATH ====="
-          echo "$LIBCLANG_PATH"
-
-          if [ ! -d "$LIBCLANG_PATH" ]; then
-            echo "LIBCLANG_PATH 不存在"
-            exit 1
-          fi
-
-          find "$LIBCLANG_PATH" \
-            -maxdepth 1 \
-            -name "libclang*.so*" \
-            -print
+          echo "LIBCLANG_PATH=$LIBCLANG_PATH"
+          ls -la "$LIBCLANG_PATH"
+          find "$LIBCLANG_PATH" -maxdepth 1 -name "libclang*.so*" -print
 
       - name: Force NDK version
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          echo "===== 固定 NDK 27.3 ====="
+          find . -type f -name "build.gradle" -o -name "build.gradle.kts" -print0 | \
+            xargs -0 sed -i -E \
+            's/ndkVersion[[:space:]]*[=:][[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion = "27.3.13750724"/g' || true
 
-          if [ -f android/app/build.gradle ]; then
-            sed -i 's/ndkVersion flutter.ndkVersion/ndkVersion "27.3.13750724"/g' android/app/build.gradle
+          grep -R "ndkVersion" android plugins 2>/dev/null || true
+
+      - name: Fix dashboard const error
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: |
+          FILE="lib/views/dashboard/dashboard.dart"
+
+          if [ ! -f "$FILE" ]; then
+            echo "dashboard.dart not found"
+            exit 1
           fi
 
-          if [ -f android/app/build.gradle.kts ]; then
-            sed -i 's/ndkVersion = flutter.ndkVersion/ndkVersion = "27.3.13750724"/g' android/app/build.gradle.kts
-          fi
+          echo "Before patch:"
+          nl -ba "$FILE" | sed -n '195,225p'
 
-          echo "===== 当前 NDK 配置 ====="
+          python3 <<'PY'
+          from pathlib import Path
+          import re
 
-          grep -R "ndkVersion" android \
-            --include="*.gradle" \
-            --include="*.gradle.kts" \
-            || true
+          file = Path("lib/views/dashboard/dashboard.dart")
+          lines = file.read_text().splitlines()
+
+          target = None
+
+          for i, line in enumerate(lines):
+              if "child: IkunBanner()," in line:
+                  target = i
+                  break
+
+          if target is None:
+              print("IkunBanner line not found - nothing to patch")
+              raise SystemExit(0)
+
+          print(f"Found IkunBanner at line {target + 1}")
+
+          # 找到包住 IkunBanner 的最近 const 构造器并移除 const
+          patch_line = None
+
+          for j in range(target - 1, max(-1, target - 50), -1):
+              line
+              if patch_line is None:
+              print("Could not find enclosing const constructor")
+              print("\n".join(
+                  f"{i+1}: {lines[i]}"
+                  for i in range(max(0, target-15), min(len(lines), target+5))
+              ))
+              raise SystemExit(1)
+
+          old = lines[patch_line]
+          lines[patch_line] = re.sub(r"\bconst\s+", "", lines[patch_line], count=1)
+
+          print(f"Patched line {patch_line + 1}:")
+          print("OLD:", old)
+          print("NEW:", lines[patch_line])
+
+          file.write_text("\n".join(lines) + "\n")
+          PY
+
+          echo "After patch:"
+          nl -ba "$FILE" | sed -n '195,225p'
 
       - name: Check build environment
         run: |
-          echo "======================================"
-          echo "ANDROID_NDK=$ANDROID_NDK"
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
-          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
-          echo "LIBCLANG_PATH=$LIBCLANG_PATH"
-          echo "======================================"
-
-          echo "===== clang ====="
-
-          "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --version
-
-          echo "===== ARM64 clang ====="
-
-          "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" --version
-
-          echo "===== libclang ====="
-
-          find "$LIBCLANG_PATH" \
-            -maxdepth 1 \
-            -name "libclang*.so*" \
-            -print
-
-      - name: Check Flutter version
-        run: |
-          echo "===== Flutter ====="
+          echo "Flutter:"
           flutter --version
 
-          echo "===== Dart ====="
+          echo "Dart:"
           dart --version
 
-      - name: Show dashboard context
-        working-directory: ${{ env.PROJECT_ROOT }}
-        run: |
-          echo "===== dashboard.dart 195-225 ====="
+          echo "NDK:"
+          echo "$ANDROID_NDK_ROOT"
 
-          if [ -f lib/views/dashboard/dashboard.dart ]; then
-            nl -ba lib/views/dashboard/dashboard.dart \
-              | sed -n '195,225p'
-          else
-            echo "找不到 dashboard.dart"
-          fi
+          echo "ARM64 clang:"
+          "$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" --version
+
+          echo "libclang:"
+          ls -la "$LIBCLANG_PATH"/libclang*.so*
 
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          echo "===== Flutter clean ====="
           flutter clean
-
-          echo "===== Flutter pub get ====="
           flutter pub get
 
       - name: Build ARM64 APK
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          echo "======================================"
-          echo "开始构建 IKUN Clash ARM64 APK"
-          echo "======================================"
-
           flutter build apk \
             --release \
             --target-platform android-arm64 \
@@ -253,10 +232,10 @@ jobs:
         with:
           name: IKUN-Clash-ARM64
           path: ${{ env.PROJECT_ROOT }}/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
 
       - name: Finish
         run: |
-          echo "======================================"
-          echo "IKUN Clash ARM64 APK 构建完成！"
-          echo "======================================"
-          
+          echo "================================="
+          echo "IKUN Clash ARM64 APK BUILD DONE"
+          echo "================================="
