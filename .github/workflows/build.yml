@@ -27,8 +27,14 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: "3.29.3"
           channel: stable
           cache: true
+
+      - name: Check Flutter version
+        run: |
+          flutter --version
+          dart --version
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -42,11 +48,14 @@ jobs:
 
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_ROOT }}
-        run: flutter pub get
+        run: |
+          flutter clean
+          flutter pub get
 
       - name: Build ARM64 APK
         working-directory: ${{ env.PROJECT_ROOT }}
-        run: dart setup.dart android --arch arm64 --env pre
+        run: |
+          dart setup.dart android --arch arm64 --env pre
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
