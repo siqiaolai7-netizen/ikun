@@ -31,7 +31,7 @@ jobs:
 
           echo "PROJECT_ROOT=$PWD/source" >> "$GITHUB_ENV"
 
-          echo "Source extracted."
+          echo "Source extracted successfully."
           ls -la source
 
       # =========================================================
@@ -103,7 +103,7 @@ jobs:
               's/package:fl_clash\//package:ikun_clash\//g'
           fi
 
-          echo "Package name replacement completed."
+          echo "Package replacement completed."
 
       # =========================================================
       # 5. Fix Dart SDK constraint
@@ -125,7 +125,7 @@ jobs:
           grep -n "sdk:" pubspec.yaml || true
 
       # =========================================================
-      # 6. Install Java
+      # 6. Install Java 17
       # =========================================================
       - name: Install Java
         uses: actions/setup-java@v5
@@ -150,7 +150,9 @@ jobs:
         run: |
           set -e
 
-          echo "Finding sdkmanager..."
+          echo "======================================"
+          echo "Finding sdkmanager"
+          echo "======================================"
 
           SDKMANAGER=$(find "$ANDROID_SDK_ROOT" \
             -type f \
@@ -164,16 +166,20 @@ jobs:
 
           echo "sdkmanager: $SDKMANAGER"
 
-          chmod +x "$SDKMANAGER"
+          echo ""
+          echo "======================================"
+          echo "Accept Android licenses"
+          echo "======================================"
 
-          echo "Accepting Android licenses..."
-
-          yes | "$SDKMANAGER" --licenses \
+          yes | bash "$SDKMANAGER" --licenses \
             >/dev/null 2>&1 || true
 
-          echo "Installing NDK 27.3.13750724..."
+          echo ""
+          echo "======================================"
+          echo "Install NDK 27.3.13750724"
+          echo "======================================"
 
-          "$SDKMANAGER" \
+          bash "$SDKMANAGER" \
             "ndk;27.3.13750724"
 
           NDK_PATH="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
@@ -183,11 +189,13 @@ jobs:
           echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"
 
           echo ""
-          echo "NDK:"
+          echo "NDK path:"
           echo "$NDK_PATH"
 
           echo ""
-          echo "Checking ARM64 compiler..."
+          echo "======================================"
+          echo "Checking ARM64 compiler"
+          echo "======================================"
 
           test -f \
             "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
@@ -196,7 +204,7 @@ jobs:
             --version
 
           echo ""
-          echo "NDK setup completed."
+          echo "NDK setup completed successfully."
 
       # =========================================================
       # 9. Setup libclang
@@ -205,7 +213,9 @@ jobs:
         run: |
           set -e
 
-          echo "Installing clang and libclang..."
+          echo "======================================"
+          echo "Installing clang and libclang"
+          echo "======================================"
 
           sudo apt-get update
 
@@ -247,7 +257,11 @@ jobs:
 
           if [ -z "$LIBCLANG_FILE" ]; then
             echo "ERROR: libclang not found."
-            find /usr/lib -name "libclang*.so*" -print || true
+
+            find /usr/lib \
+              -name "libclang*.so*" \
+              -print || true
+
             exit 1
           fi
 
@@ -265,7 +279,7 @@ jobs:
           fi
 
           echo ""
-          echo "libclang file:"
+          echo "libclang files:"
           ls -la "$LIBCLANG_PATH"/libclang*
 
           echo ""
@@ -299,14 +313,14 @@ jobs:
 
           find android \
             -type f \
-            \( -name "build.gradle" -o -name "build.gradle.kts" \) \
+            -name "build.gradle" -o -name "build.gradle.kts" \
             -print || true
 
           if [ -d android ]; then
 
             find android \
               -type f \
-              \( -name "build.gradle" -o -name "build.gradle.kts" \) \
+              -name "build.gradle" -o -name "build.gradle.kts" \
               -print0 | \
               xargs -0 sed -i \
               -E 's/ndkVersion[[:space:]]*[=:][[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion = "27.3.13750724"/g' \
@@ -359,9 +373,7 @@ jobs:
 
           patch_line = None
 
-          # Search upward for the enclosing const constructor.
           for j in range(target - 1, max(-1, target - 60), -1):
-
               line = lines[j]
 
               if "const " in line and "(" in line:
@@ -398,13 +410,13 @@ jobs:
           PY
 
           echo ""
-          echo "Dashboard context after patch:"
+          echo "Dashboard context:"
           nl -ba "$FILE" | sed -n '195,225p'
 
       # =========================================================
-      # 13. Fix IkunBanner definition if needed
+      # 13. Check IkunBanner
       # =========================================================
-      - name: Fix IkunBanner
+      - name: Check IkunBanner
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
           set -e
@@ -418,6 +430,7 @@ jobs:
 
           echo ""
           echo "IkunBanner references:"
+
           grep -R -n \
             "IkunBanner" \
             lib plugins \
@@ -436,6 +449,10 @@ jobs:
 
           flutter --version
 
+          echo ""
+          echo "======================================"
+          echo "Dart"
+          echo
           echo ""
           echo "======================================"
           echo "Dart"
@@ -525,3 +542,6 @@ jobs:
           echo "======================================"
           echo "IKUN Clash ARM64 APK BUILD DONE"
           echo "======================================"
+          echo ""
+          echo "APK:"
+          echo "${GITHUB_WORKSPACE}/source/build/app/outputs/flutter-apk/app-release.apk"
