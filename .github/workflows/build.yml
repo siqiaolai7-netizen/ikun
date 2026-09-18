@@ -3,25 +3,49 @@ name: IKUN Clash ARM64 APK
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+
+      # =========================================================
+      # 1. Checkout
+      # =========================================================
       - name: Checkout
         uses: actions/checkout@v4
 
+      # =========================================================
+      # 2. Extract source
+      # =========================================================
       - name: Extract source
         run: |
-          unzip -q IKUN-Clash-final-source.zip -d source
-          echo "PROJECT_ROOT=$PWD/source" >> $GITHUB_ENV
+          set -e
 
-      - name: Prepare Clash.Meta
+          rm -rf source
+
+          unzip -q IKUN-Clash-final-source.zip -d source
+
+          echo "PROJECT_ROOT=$PWD/source" >> "$GITHUB_ENV"
+
+          echo "Source extracted successfully."
+
+      # =========================================================
+      # 3. Restore Clash.Meta
+      # =========================================================
+      - name: Restore Clash.Meta
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          set -eux
+          set -e
+
+          echo "======================================"
+          echo "Restoring Clash.Meta"
+          echo "======================================"
+
+          mkdir -p core
 
           rm -rf core/Clash.Meta
 
@@ -31,254 +55,545 @@ jobs:
             https://github.com/chen08209/Clash.Meta.git \
             core/Clash.Meta
 
-          echo "=== Clash.Meta go.mod ==="
-          grep -n "sing-shadowtls" core/Clash.Meta/go.mod || true
+          echo ""
+          echo "Checking Clash.Meta..."
 
-          echo "=== Clash.Meta module ==="
+          test -f core/Clash.Meta/go.mod
+          test -f core/Clash.Meta/go.sum
+
+          echo ""
+          echo "Clash.Meta commit:"
+
           cd core/Clash.Meta
-          go mod download
-          go mod verify
 
-      - name: Fix CORE Go dependencies
-        working-directory: ${{ env.PROJECT_ROOT }}
+          git rev-parse HEAD
+
+          echo ""
+          echo "Clash.Meta restored successfully."
+
+      # =========================================================
+      # 4. Fix Clash.Meta Go dependencies
+      # =========================================================
+      - name: Fix Clash.Meta Go dependencies
+        working-directory: ${{ env.PROJECT_ROOT }}/core/Clash.Meta
         run: |
-          set -eux
+          set -e
 
-          echo "=== Before fix ==="
-          grep -n "sing-shadowtls" core/go.mod || true
-          grep -n "sing-shadowtls" core/go.sum || true
+          echo "======================================"
+          echo "Fixing Clash.Meta Go dependencies"
+          echo "======================================"
 
-          cd core
+          echo ""
+          echo "Go version:"
+          go version
 
-          SHADOWTLS_VERSION="$(go list -m -f '{{.Version}}' \
-            github.com/metacubex/sing-shadowtls 2>/dev/null || true)"
+          echo ""
+          echo "Original sing-shadowtls entry:"
+          grep \
+            "github.com/metacubex/sing-shadowtls" \
+            go.mod || true
 
-          if [ -z "$SHADOWTLS_VERSION" ] || [ "$SHADOWTLS_VERSION" = "<nil>" ]; then
-            SHADOWTLS_VERSION="v0.0.0-20260517015314-c11c36474edc"
-          fi
+          echo ""
+          echo "Adding correct sing-shadowtls version..."
 
-          echo "Using sing-shadowtls: $SHADOWTLS_VERSION"
+          go get \
+            github.com/metacubex/sing-shadowtls@v0.0.0-20260517015314-c11c36474edc
 
-          go get "github.com/metacubex/sing-shadowtls@$SHADOWTLS_VERSION"
-
-          go mod download "github.com/metacubex/sing-shadowtls@$SHADOWTLS_VERSION"
+          echo ""
+          echo "Running go mod tidy..."
 
           go mod tidy
 
+          echo ""
+          echo "Downloading all Go modules..."
+
           go mod download
+
+          echo ""
+          echo "Verifying Go modules..."
+
           go mod verify
 
-          echo "=== After fix ==="
-          grep -n "sing-shadowtls" go.mod || true
-          grep -n "sing-shadowtls" go.sum || true
+          echo ""
+          echo "Checking sing-shadowtls in go.mod..."
 
-      - name: Verify CORE dependency resolution
+          grep \
+            "github.com/metacubex/sing-shadowtls" \
+            go.mod
+
+          echo ""
+          echo "Checking sing-shadowtls in go.sum..."
+
+          grep \
+            "github.com/metacubex/sing-shadowtls" \
+            go.sum
+
+          echo ""
+          echo "Go dependency preparation completed."
+
+      # =========================================================
+      # 5. Fix source package name
+      # =========================================================
+      - name: Fix source package name
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          set -eux
+          set -e
 
-          cd core
+          echo "Replacing package:fl_clash with package:ikun_clash..."
 
-          echo "=== Go version ==="
-          go version
+          if [ -d lib ]; then
+            find lib \
+              -type f \
+              -name "*.dart" \
+              -print0 | \
+              xargs -0 sed -i \
+              's/package:fl_clash\//package:ikun_clash\//g'
+          fi
 
-          echo "=== Module ==="
-          go env GOMOD
+          if [ -d plugins ]; then
+            find plugins \
+              -type f \
+              -name "*.dart" \
+              -print0 | \
+              xargs -0 sed -i \
+              's/package:fl_clash\//package:ikun_clash\//g'
+          fi
 
-          echo "=== Go work ==="
-          go env GOWORK
+          echo "Package replacement completed."
 
-          echo "=== sing-shadowtls in core/go.sum ==="
-          grep "github.com/metacubex/sing-shadowtls" go.sum
-
-          echo "=== Test dependency graph ==="
-          GOOS=android \
-          GOARCH=arm64 \
-          CGO_ENABLED=1 \
-          go list -deps -tags=with_gvisor ./... >/tmp/go-deps.txt
-
-          echo "Dependency graph OK"
-
-      - name: Replace package name
-        working-directory: ${{ env.PROJECT_ROOT }}
-        run: |
-          set -eux
-
-          find . \
-            -type f \
-            \( -name "*.dart" -o -name "*.yaml" -o -name "*.yml" -o -name "*.xml" -o -name "*.gradle" -o -name "*.properties" \) \
-            -print0 \
-            | xargs -0 sed -i 's/package:fl_clash/package:ikun_clash/g'
-
+      # =========================================================
+      # 6. Fix Dart SDK constraint
+      # =========================================================
       - name: Fix Dart SDK constraint
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          set -eux
+          set -e
 
-          find . \
-            -type f \
-            \( -name "pubspec.yaml" -o -name "pubspec.lock" \) \
-            -print0 \
-            | xargs -0 sed -i 's/>=3\.12\.0 <4\.0\.0/>=3.13.0 <4.0.0/g'
+          sed -i \
+            's/>=3\.12\.0 <4\.0\.0/>=3.13.0 <4.0.0/g' \
+            pubspec.yaml
 
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
+          echo "SDK constraint:"
+          grep -n "sdk:" pubspec.yaml || true
+
+      # =========================================================
+      # 7. Install Java 17
+      # =========================================================
+      - name: Install Java
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
+      # =========================================================
+      # 8. Setup Flutter
+      # =========================================================
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: stable
           flutter-version: "3.47.2"
+          channel: stable
           cache: true
 
+      # =========================================================
+      # 9. Setup Android NDK
+      # =========================================================
       - name: Setup Android NDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install NDK 27.3
         run: |
-          set -eux
+          set -e
 
-          yes | sdkmanager --licenses >/dev/null || true
+          echo "Finding sdkmanager..."
 
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0" \
+          SDKMANAGER=$(find "$ANDROID_SDK_ROOT" \
+            -type f \
+            -name "sdkmanager" \
+            | head -n 1)
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager not found."
+            exit 1
+          fi
+
+          echo "sdkmanager: $SDKMANAGER"
+
+          echo "Accepting Android licenses..."
+
+          yes | bash "$SDKMANAGER" --licenses \
+            >/dev/null 2>&1 || true
+
+          echo "Installing NDK 27.3.13750724..."
+
+          bash "$SDKMANAGER" \
             "ndk;27.3.13750724"
 
+          NDK_PATH="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+
+          echo "ANDROID_NDK=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"
+
+          echo ""
+          echo "NDK:"
+          echo "$NDK_PATH"
+
+          echo ""
+          echo "Checking ARM64 compiler..."
+
+          test -f \
+            "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang"
+
+          "$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang" \
+            --version
+
+          echo "NDK setup completed."
+
+      # =========================================================
+      # 10. Install system libclang
+      # =========================================================
       - name: Setup libclang
         run: |
-          set -eux
+          set -e
+
+          echo "======================================"
+          echo "Installing libclang"
+          echo "======================================"
 
           sudo apt-get update
+
           sudo apt-get install -y \
             clang \
-            llvm \
-            libclang-dev
+            libclang-dev \
+            libclang-18-dev
 
-          echo "=== clang ==="
-          clang --version
+          echo ""
+          echo "Searching system libclang..."
 
-          echo "=== libclang ==="
-          find /usr/lib /usr/lib/llvm \
+          LIBCLANG_FILE=$(find /usr/lib/llvm-18/lib \
+            \( -type f -o -type l \) \
             -name "libclang.so*" \
-            -o -name "libclang-cpp.so*" \
-            2>/dev/null | head -50
+            | head -n 1)
 
-      - name: Link libclang into NDK
+          if [ -z "$LIBCLANG_FILE" ]; then
+            LIBCLANG_FILE=$(find /usr/lib \
+              \( -type f -o -type l \) \
+              -name "libclang.so*" \
+              | head -n 1)
+          fi
+
+          if [ -z "$LIBCLANG_FILE" ]; then
+            echo "ERROR: system libclang not found."
+
+            find /usr/lib \
+              -name "libclang*.so*" \
+              -print || true
+
+            exit 1
+          fi
+
+          echo "System libclang:"
+          echo "$LIBCLANG_FILE"
+
+          LLVM_DIR=$(dirname "$LIBCLANG_FILE")
+
+          echo "LLVM_DIR=$LLVM_DIR"
+
+          echo "LIBCLANG_PATH=$LLVM_DIR" >> "$GITHUB_ENV"
+
+          echo "LD_LIBRARY_PATH=$LLVM_DIR:${LD_LIBRARY_PATH:-}" \
+            >> "$GITHUB_ENV"
+
+          if [ ! -e "$LLVM_DIR/libclang.so" ]; then
+            sudo ln -sf \
+              "$LIBCLANG_FILE" \
+              "$LLVM_DIR/libclang.so"
+          fi
+
+          echo ""
+          echo "System libclang installed."
+
+      # =========================================================
+      # 11. Put libclang inside Android NDK
+      # =========================================================
+      - name: Install libclang into NDK
         run: |
-          set -eux
+          set -e
 
-          NDK="$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          echo "======================================"
+          echo "Installing libclang into NDK"
+          echo "======================================"
 
-          echo "NDK=$NDK"
+          NDK_LLVM="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64"
 
-          find /usr/lib /usr/lib/llvm \
-            \( -name "libclang.so*" -o -name "libclang-cpp.so*" \) \
-            -print 2>/dev/null | head -50
+          echo "NDK LLVM:"
+          echo "$NDK_LLVM"
 
-          mkdir -p "$NDK/toolchains/llvm/prebuilt/linux-x86_64/lib"
+          test -d "$NDK_LLVM"
 
-          for f in \
-            /usr/lib/llvm-*/lib/libclang.so* \
-            /usr/lib/llvm-*/lib/libclang-cpp.so* \
-            /usr/lib/x86_64-linux-gnu/libclang.so* \
-            /usr/lib/x86_64-linux-gnu/libclang-cpp.so*; do
+          sudo mkdir -p "$NDK_LLVM/lib"
+          sudo mkdir -p "$NDK_LLVM/lib64"
 
-            if [ -e "$f" ]; then
-              ln -sf "$f" \
-                "$NDK/toolchains/llvm/prebuilt/linux-x86_64/lib/$(basename "$f")"
-            fi
-          done
+          echo ""
+          echo "Locating system libclang..."
 
-      - name: Force Android NDK version
+          SYSTEM_LIBCLANG=$(find /usr/lib/llvm-18/lib \
+            \( -type f -o -type l \) \
+            -name "libclang.so*" \
+            | head -n 1)
+
+          if [ -z "$SYSTEM_LIBCLANG" ]; then
+            SYSTEM_LIBCLANG=$(find /usr/lib \
+              \( -type f -o -type l \) \
+              -name "libclang.so*" \
+              | head -n 1)
+          fi
+
+          if [ -z "$SYSTEM_LIBCLANG" ]; then
+            echo "ERROR: Could not find system libclang."
+            exit 1
+          fi
+
+          echo "Using:"
+          echo "$SYSTEM_LIBCLANG"
+
+          echo ""
+          echo "Creating libclang.so links..."
+
+          sudo ln -sf \
+            "$SYSTEM_LIBCLANG" \
+            "$NDK_LLVM/lib/libclang.so"
+
+          sudo ln -sf \
+            "$SYSTEM_LIBCLANG" \
+            "$NDK_LLVM/lib64/libclang.so"
+
+          echo ""
+          echo "Checking NDK lib..."
+
+          ls -la "$NDK_LLVM/lib"/libclang*
+
+          echo ""
+          echo "Checking NDK lib64..."
+
+          ls -la "$NDK_LLVM/lib64"/libclang*
+
+          test -e "$NDK_LLVM/lib/libclang.so"
+          test -e "$NDK_LLVM/lib64/libclang.so"
+
+          echo ""
+          echo "NDK libclang setup completed."
+
+      # =========================================================
+      # 12. Check Rust libclang
+      # =========================================================
+      - name: Check Rust libclang
+        run: |
+          set -e
+
+          NDK_LLVM="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64"
+
+          test -e "$NDK_LLVM/lib/libclang.so"
+          test -e "$NDK_LLVM/lib64/libclang.so"
+
+          echo ""
+          echo "Rust libclang check passed."
+
+      # =========================================================
+      # 13. Force NDK version
+      # =========================================================
+      - name: Force NDK version
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          set -eux
+          set -e
 
-          find android \
-            -type f \
-            \( -name "*.gradle" -o -name "*.gradle.kts" -o -name "*.toml" \) \
-            -print0 \
-            | xargs -0 sed -i \
-              -e 's/ndkVersion *= *.*/ndkVersion = "27.3.13750724"/g' \
-              -e 's/ndk = "[^"]*"/ndk = "27.3.13750724"/g'
+          if [ -d android ]; then
 
+            find android \
+              -type f \
+              \( \
+                -name "build.gradle" \
+                -o \
+                -name "build.gradle.kts" \
+              \) \
+              -print0 | \
+              xargs -0 sed -i \
+              -E 's/ndkVersion[[:space:]]*[=:][[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion = "27.3.13750724"/g' \
+              || true
+
+          fi
+
+          echo "NDK version:"
+          echo "27.3.13750724"
+
+      # =========================================================
+      # 14. Fix missing IkunBanner
+      # =========================================================
       - name: Fix missing IkunBanner
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          set -eux
+          set -e
 
-          grep -RIl "IkunBanner" lib 2>/dev/null | while read -r file; do
-            sed -i \
-              -e 's/const IkunBanner()/const SizedBox.shrink()/g' \
-              -e 's/IkunBanner()/const SizedBox.shrink()/g' \
-              "$file"
-          done || true
+          FILE="lib/views/dashboard/dashboard.dart"
 
-      - name: Environment check
-        working-directory: ${{ env.PROJECT_ROOT }}
+          if [ ! -f "$FILE" ]; then
+            echo "dashboard.dart not found."
+            exit 1
+          fi
+
+          echo "Replacing missing IkunBanner..."
+
+          python3 <<'PY'
+          from pathlib import Path
+
+          file = Path("lib/views/dashboard/dashboard.dart")
+
+          text = file.read_text()
+
+          old = "child: IkunBanner(),"
+          new = "child: const SizedBox.shrink(),"
+
+          count = text.count(old)
+
+          print(f"Found {count} IkunBanner reference(s).")
+
+          if count:
+              text = text.replace(old, new)
+              file.write_text(text)
+              print("IkunBanner replaced.")
+          else:
+              print("IkunBanner reference not found.")
+          PY
+
+          echo ""
+          echo "Checking replacement..."
+
+          grep -n "SizedBox.shrink" "$FILE" || true
+
+      # =========================================================
+      # 15. Check build environment
+      # =========================================================
+      - name: Check build environment
         run: |
-          set -eux
+          set -e
 
-          echo "=== Flutter ==="
+          echo "======================================"
+          echo "Flutter"
+          echo "======================================"
+
           flutter --version
 
-          echo "=== Dart ==="
+          echo ""
+          echo "======================================"
+          echo "Dart"
+          echo "======================================"
+
           dart --version
 
-          echo "=== Java ==="
+          echo ""
+          echo "======================================"
+          echo "Java"
+          echo "======================================"
+
           java -version
 
-          echo "=== Go ==="
+          echo ""
+          echo "======================================"
+          echo "Go"
+          echo "======================================"
+
           go version
 
-          echo "=== NDK ==="
-          ls -la "$ANDROID_SDK_ROOT/ndk/27.3.13750724"
+          echo ""
+          echo "======================================"
+          echo "NDK"
+          echo "======================================"
 
-          echo "=== CORE module ==="
-          cd core
-          go env GOMOD
-          go env GOPATH
-          grep "github.com/metacubex/sing-shadowtls" go.sum
+          echo "$ANDROID_NDK"
 
-      - name: Flutter clean
+          echo ""
+          echo "======================================"
+          echo "Clash.Meta"
+          echo "======================================"
+
+          CLASH_DIR="${GITHUB_WORKSPACE}/source/core/Clash.Meta"
+
+          test -f "$CLASH_DIR/go.mod"
+          test -f "$CLASH_DIR/go.sum"
+
+          echo "go.mod exists."
+          echo "go.sum exists."
+
+          echo ""
+          echo "sing-shadowtls in go.mod:"
+
+          grep -n \
+            "github.com/metacubex/sing-shadowtls" \
+            "$CLASH_DIR/go.mod"
+
+          echo ""
+          echo "sing-shadowtls in go.sum:"
+
+          grep -n \
+            "github.com/metacubex/sing-shadowtls" \
+            "$CLASH_DIR/go.sum"
+
+          echo ""
+          echo "Go dependency verification:"
+
+          cd "$CLASH_DIR"
+
+          go mod verify
+
+          echo ""
+          echo "Clash.Meta dependency check passed."
+
+      # =========================================================
+      # 16. Install Flutter dependencies
+      # =========================================================
+      - name: Install dependencies
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          set -eux
+          set -e
 
           flutter clean
-          rm -rf .dart_tool/setup_build_cache
-
-      - name: Flutter pub get
-        working-directory: ${{ env.PROJECT_ROOT }}
-        run: |
-          set -eux
 
           flutter pub get
 
+      # =========================================================
+      # 17. Build ARM64 APK
+      # =========================================================
       - name: Build ARM64 APK
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          set -eux
+          set -e
+
+          echo "======================================"
+          echo "Building IKUN Clash ARM64 APK"
+          echo "======================================"
 
           flutter build apk \
             --release \
             --target-platform android-arm64 \
             --verbose
 
+      # =========================================================
+      # 18. Upload APK
+      # =========================================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ikun-clash-arm64
+          name: IKUN-Clash-ARM64
           path: ${{ env.PROJECT_ROOT }}/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
 
+      # =========================================================
+      # 19. Finish
+      # =========================================================
       - name: Finish
         run: |
           echo "======================================"
-          echo " IKUN Clash ARM64 BUILD FINISHED"
+          echo "IKUN Clash ARM64 APK BUILD DONE"
           echo "======================================"
+
+          echo ""
+          echo "APK:"
+          echo "${GITHUB_WORKSPACE}/source/build/app/outputs/flutter-apk/app-release.apk"
