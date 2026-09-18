@@ -1,0 +1,57 @@
+name: IKUN Clash ARM64 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract source
+        run: |
+          unzip -q IKUN-Clash-final-source.zip -d source
+          ROOT=$(find source -name pubspec.yaml -print -quit | xargs dirname)
+          echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Setup Android
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: flutter pub get
+
+      - name: Build ARM64 APK
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: dart setup.dart android --arch arm64 --env pre
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: IKUN-Clash-ARM64
+          path: |
+            ${{ env.PROJECT_ROOT }}/dist/**/*.apk
+            ${{ env.PROJECT_ROOT }}/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
