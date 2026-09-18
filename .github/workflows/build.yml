@@ -17,6 +17,12 @@ jobs:
           unzip -q IKUN-Clash-final-source.zip -d source
           echo "PROJECT_ROOT=$PWD/source" >> $GITHUB_ENV
 
+      - name: Fix pubspec SDK constraint
+        working-directory: ${{ env.PROJECT_ROOT }}
+        run: |
+          sed -i "s#sdk: '>=3.10.0 <4.0.0'#sdk: '>=3.10.0-0 <4.0.0'#" pubspec.yaml
+          cat pubspec.yaml
+
       - name: Install Java
         uses: actions/setup-java@v4
         with:
