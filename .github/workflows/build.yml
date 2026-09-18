@@ -37,7 +37,7 @@ jobs:
         run: |
           sed -i 's/>=3\.12\.0 <4\.0\.0/>=3.13.0 <4.0.0/g' pubspec.yaml
 
-          echo "Dart SDK:"
+          echo "Dart SDK constraint:"
           grep -n "sdk:" pubspec.yaml || true
 
       - name: Install Java
@@ -55,6 +55,8 @@ jobs:
 
       - name: Setup Android NDK
         run: |
+          echo "Finding sdkmanager..."
+
           SDKMANAGER=$(find "$ANDROID_SDK_ROOT" -type f -name "sdkmanager" | head -n 1)
 
           if [ -z "$SDKMANAGER" ]; then
@@ -77,6 +79,7 @@ jobs:
 
           if [ ! -x "$CLANG" ]; then
             echo "ARM64 clang not found"
+            echo "$CLANG"
             exit 1
           fi
 
@@ -92,34 +95,36 @@ jobs:
 
           NDK_LLVM="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64"
 
-          echo "NDK LLVM directory:"
+          echo "NDK LLVM:"
           echo "$NDK_LLVM"
 
-          echo "Searching system libclang..."
+          echo "Searching libclang..."
 
-          LIBCLANG_FILE=$(find /usr/lib -type f -name "libclang.so*" | head -n 1)
+          LIBCLANG_FILE=""
 
-          if [ -z "$LIBCLANG_FILE" ]; then
-            echo "System libclang not found."
-            find /usr/lib -name "libclang*.so*" -print || true
+          if [ -e "/usr/lib/llvm-18/lib/libclang.so" ]; then
+            LIBCLANG_FILE="/usr/lib/llvm-18/lib/libclang.so"
+          else
+            LIBCLANG_FILE=$(find /usr/lib -name "libclang.so*" | head -n 1)
+          fi
+
+          if [ -z "$LIBCLANG_FILE" ] || [ ! -e "$LIBCLANG_FILE" ]; then
+            echo "libclang not found"
+            find /usr/lib -name "libclang.so*" -print || true
             exit 1
           fi
 
-          echo "Found:"
+          echo "Found libclang:"
           echo "$LIBCLANG_FILE"
 
-          # rust_api 的 hook 会直接检查 NDK 的 lib/lib64
           mkdir -p "$NDK_LLVM/lib"
-
-          sudo ln -sf "$LIBCLANG_FILE" "$NDK_LLVM/lib/libclang.so"
-
-          # 同时放到 lib64，兼容 hook 的另一种搜索路径
           mkdir -p "$NDK_LLVM/lib64"
 
+          sudo ln -sf "$LIBCLANG_FILE" "$NDK_LLVM/lib/libclang.so"
           sudo ln -sf "$LIBCLANG_FILE" "$NDK_LLVM/lib64/libclang.so"
 
-          # 设置运行时搜索路径
           echo "LIBCLANG_PATH=$NDK_LLVM/lib" >> "$GITHUB_ENV"
+
           echo "LD_LIBRARY_PATH=$NDK_LLVM/lib:$NDK_LLVM/lib64:/usr/lib/llvm-18/lib:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
 
           echo "========== NDK lib =========="
@@ -128,14 +133,13 @@ jobs:
           echo "========== NDK lib64 =========="
           ls -la "$NDK_LLVM/lib64"
 
-          echo "libclang fixed inside NDK."
+          echo "libclang setup OK."
 
       - name: Check Rust libclang
         run: |
           NDK_LLVM="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64"
 
-          echo "Checking:"
-          echo "$NDK_LLVM"
+          echo "Checking NDK libclang..."
 
           if [ ! -e "$NDK_LLVM/lib/libclang.so" ]; then
             echo "NDK lib/libclang.so NOT FOUND"
@@ -147,7 +151,6 @@ jobs:
             exit 1
           fi
 
-          echo "libclang in NDK:"
           ls -la "$NDK_LLVM/lib/libclang.so"
           ls -la "$NDK_LLVM/lib64/libclang.so"
 
@@ -156,17 +159,28 @@ jobs:
       - name: Force NDK version
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          if [ -f android/app/build.gradle ]; then
-            sed -i -E \
-              's/ndkVersion[[:space:]]*[=:][[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion = "27.3.13750724"/g' \
-              android/app/build.gradle
-          fi
+          python3 <<'PY'
+          from pathlib import Path
+          import re
 
-          if [ -f android/app/build.gradle.kts ]; then
-            sed -i -E \
-              's/ndkVersion[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion = "27.3.13750724"/g' \
-              android/app/build.gradle.kts
-          fi
+          for file in [
+              Path("android/app/build.gradle"),
+              Path("android/app/build.gradle.kts"),
+          ]:
+              if not file.exists():
+                  continue
+
+              text = file.read_text()
+
+              text = re.sub(
+                  r'ndkVersion\s*(?:=|:)?\s*["\'][^"\']+["\']',
+                  'ndkVersion = "27.3.13750724"',
+                  text
+              )
+
+              file.write_text(text)
+              print("Updated:", file)
+          PY
 
           echo "NDK configuration:"
           grep -R "ndkVersion" android 2>/dev/null || true
