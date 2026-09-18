@@ -203,10 +203,17 @@ jobs:
           echo ""
           echo "Searching system libclang..."
 
-          LIBCLANG_FILE=$(find /usr/lib \
-            -type f \
+          LIBCLANG_FILE=$(find /usr/lib/llvm-18/lib \
+            \( -type f -o -type l \) \
             -name "libclang.so*" \
             | head -n 1)
+
+          if [ -z "$LIBCLANG_FILE" ]; then
+            LIBCLANG_FILE=$(find /usr/lib \
+              \( -type f -o -type l \) \
+              -name "libclang.so*" \
+              | head -n 1)
+          fi
 
           if [ -z "$LIBCLANG_FILE" ]; then
             echo "ERROR: system libclang not found."
@@ -266,10 +273,17 @@ jobs:
           echo ""
           echo "Locating system libclang..."
 
-          SYSTEM_LIBCLANG=$(find /usr/lib \
-            -type f \
+          SYSTEM_LIBCLANG=$(find /usr/lib/llvm-18/lib \
+            \( -type f -o -type l \) \
             -name "libclang.so*" \
             | head -n 1)
+
+          if [ -z "$SYSTEM_LIBCLANG" ]; then
+            SYSTEM_LIBCLANG=$(find /usr/lib \
+              \( -type f -o -type l \) \
+              -name "libclang.so*" \
+              | head -n 1)
+          fi
 
           if [ -z "$SYSTEM_LIBCLANG" ]; then
             echo "ERROR: Could not find system libclang."
@@ -393,7 +407,6 @@ jobs:
               print("IkunBanner replaced.")
           else:
               print("IkunBanner reference not found.")
-
           PY
 
           echo ""
