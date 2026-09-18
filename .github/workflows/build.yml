@@ -16,8 +16,7 @@ jobs:
       - name: Extract source
         run: |
           unzip -q IKUN-Clash-final-source.zip -d source
-          ROOT=$(find source -name pubspec.yaml -print -quit | xargs dirname)
-          echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
+          echo "PROJECT_ROOT=$PWD/source" >> $GITHUB_ENV
 
       - name: Setup Java
         uses: actions/setup-java@v4
