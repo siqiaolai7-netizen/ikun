@@ -18,16 +18,16 @@ jobs:
           unzip -q IKUN-Clash-final-source.zip -d source
           echo "PROJECT_ROOT=$PWD/source" >> $GITHUB_ENV
 
-      - name: Setup Java
+      - name: Install Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.29.3"
+          flutter-version: '3.38.0'
           channel: stable
           cache: true
 
@@ -36,15 +36,12 @@ jobs:
           flutter --version
           dart --version
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: stable
-
-      - name: Setup Android
-        uses: android-actions/setup-android@v3
-        with:
-          packages: ""
+      - name: Setup Android SDK
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
 
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -55,13 +52,16 @@ jobs:
       - name: Build ARM64 APK
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
-          dart setup.dart android --arch arm64 --env pre
+          flutter build apk --release --target-platform android-arm64
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: IKUN-Clash-ARM64
-          path: |
-            ${{ env.PROJECT_ROOT }}/dist/**/*.apk
-            ${{ env.PROJECT_ROOT }}/build/app/outputs/flutter-apk/*.apk
-          if-no-files-found: error
+          name: IKUN-Clash-ARM64-APK
+          path: ${{ env.PROJECT_ROOT }}/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Finish
+        run: |
+          echo "===================================="
+          echo "ARM64 APK BUILD FINISHED"
+          echo "===================================="
