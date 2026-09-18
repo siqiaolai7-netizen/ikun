@@ -42,40 +42,49 @@ jobs:
           set -e
 
           echo "======================================"
-          echo "Checking Clash.Meta"
+          echo "Restoring Clash.Meta"
           echo "======================================"
 
           mkdir -p core
 
-          if [ -f "core/Clash.Meta/go.mod" ]; then
-            echo "Clash.Meta already exists."
-          else
-            echo "Clash.Meta is missing."
-            echo "Downloading Clash.Meta..."
+          # Always remove the bundled/old Clash.Meta.
+          # We need the current FlClash branch.
+          rm -rf core/Clash.Meta
 
-            rm -rf core/Clash.Meta
+          echo "Downloading Clash.Meta FlClash branch..."
 
-            git clone \
-              --depth 1 \
-              --branch FlClash \
-              https://github.com/chen08209/Clash.Meta.git \
-              core/Clash.Meta
-          fi
+          git clone \
+            --depth 1 \
+            --branch FlClash \
+            https://github.com/chen08209/Clash.Meta.git \
+            core/Clash.Meta
+
+          echo ""
+          echo "Checking Clash.Meta..."
 
           test -f core/Clash.Meta/go.mod
+          test -f core/Clash.Meta/go.sum
 
+          echo ""
           echo "Clash.Meta restored successfully."
 
+          echo ""
+          echo "Clash.Meta commit:"
+
+          cd core/Clash.Meta
+
+          git rev-parse HEAD
+
       # =========================================================
-      # 4. Fix Clash.Meta Go dependencies
+      # 4. Prepare Clash.Meta Go dependencies
       # =========================================================
-      - name: Fix Clash.Meta Go dependencies
+      - name: Prepare Clash.Meta Go dependencies
         working-directory: ${{ env.PROJECT_ROOT }}/core/Clash.Meta
         run: |
           set -e
 
           echo "======================================"
-          echo "Fixing Clash.Meta Go dependencies"
+          echo "Preparing Clash.Meta Go dependencies"
           echo "======================================"
 
           echo ""
@@ -83,10 +92,18 @@ jobs:
           go version
 
           echo ""
-          echo "Adding missing sing-shadowtls dependency..."
+          echo "sing-shadowtls dependency from go.mod:"
 
-          go get \
-            github.com/metacubex/sing-shadowtls@v0.0.0-20250503063515-5d9f966d17a2
+          grep \
+            "github.com/metacubex/sing-shadowtls" \
+            go.mod
+
+          echo ""
+          echo "sing-shadowtls checksum from go.sum:"
+
+          grep \
+            "github.com/metacubex/sing-shadowtls" \
+            go.sum
 
           echo ""
           echo "Downloading Go modules..."
@@ -99,13 +116,7 @@ jobs:
           go mod verify
 
           echo ""
-          echo "Checking sing-shadowtls..."
-
-          grep -n "github.com/metacubex/sing-shadowtls" go.mod || true
-          grep -n "github.com/metacubex/sing-shadowtls" go.sum || true
-
-          echo ""
-          echo "Clash.Meta Go dependencies fixed."
+          echo "Go dependencies are ready."
 
       # =========================================================
       # 5. Fix source package name
@@ -526,7 +537,11 @@ jobs:
           test -f \
             "${GITHUB_WORKSPACE}/source/core/Clash.Meta/go.mod"
 
+          test -f \
+            "${GITHUB_WORKSPACE}/source/core/Clash.Meta/go.sum"
+
           echo "Clash.Meta go.mod exists."
+          echo "Clash.Meta go.sum exists."
 
           echo ""
           echo "======================================"
@@ -535,13 +550,11 @@ jobs:
 
           grep -n \
             "github.com/metacubex/sing-shadowtls" \
-            "${GITHUB_WORKSPACE}/source/core/Clash.Meta/go.mod" \
-            || true
+            "${GITHUB_WORKSPACE}/source/core/Clash.Meta/go.mod"
 
           grep -n \
             "github.com/metacubex/sing-shadowtls" \
-            "${GITHUB_WORKSPACE}/source/core/Clash.Meta/go.sum" \
-            || true
+            "${GITHUB_WORKSPACE}/source/core/Clash.Meta/go.sum"
 
       # =========================================================
       # 16. Install dependencies
