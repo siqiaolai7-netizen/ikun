@@ -313,14 +313,22 @@ jobs:
 
           find android \
             -type f \
-            -name "build.gradle" -o -name "build.gradle.kts" \
+            \( \
+              -name "build.gradle" \
+              -o \
+              -name "build.gradle.kts" \
+            \) \
             -print || true
 
           if [ -d android ]; then
 
             find android \
               -type f \
-              -name "build.gradle" -o -name "build.gradle.kts" \
+              \( \
+                -name "build.gradle" \
+                -o \
+                -name "build.gradle.kts" \
+              \) \
               -print0 | \
               xargs -0 sed -i \
               -E 's/ndkVersion[[:space:]]*[=:][[:space:]]*["'\''][^"'\'']+["'\'']/ndkVersion = "27.3.13750724"/g' \
@@ -332,9 +340,9 @@ jobs:
           echo "NDK version replacement completed."
 
       # =========================================================
-      # 12. Fix dashboard const error
+      # 12. Fix missing IkunBanner
       # =========================================================
-      - name: Fix dashboard const error
+      - name: Fix missing IkunBanner
         working-directory: ${{ env.PROJECT_ROOT }}
         run: |
           set -e
@@ -346,98 +354,43 @@ jobs:
             exit 1
           fi
 
-          echo "Searching IkunBanner..."
+          echo "Searching for IkunBanner..."
 
           grep -n "IkunBanner" "$FILE" || true
 
+          echo ""
+          echo "Replacing missing IkunBanner with SizedBox.shrink..."
+
           python3 <<'PY'
           from pathlib import Path
-          import re
 
           file = Path("lib/views/dashboard/dashboard.dart")
 
-          lines = file.read_text().splitlines()
+          text = file.read_text()
 
-          target = None
+          old = "child: IkunBanner(),"
+          new = "child: const SizedBox.shrink(),"
 
-          for i, line in enumerate(lines):
-              if "child: IkunBanner()," in line:
-                  target = i
-                  break
+          count = text.count(old)
 
-          if target is None:
-              print("IkunBanner line not found.")
-              raise SystemExit(0)
+          print(f"Found {count} IkunBanner reference(s).")
 
-          print(f"Found IkunBanner at line {target + 1}")
-
-          patch_line = None
-
-          for j in range(target - 1, max(-1, target - 60), -1):
-              line = lines[j]
-
-              if "const " in line and "(" in line:
-                  patch_line = j
-                  break
-
-          if patch_line is None:
-              print("Could not find enclosing const constructor.")
-              print("Context:")
-
-              start = max(0, target - 15)
-              end = min(len(lines), target + 15)
-
-              for i in range(start, end):
-                  print(f"{i + 1}: {lines[i]}")
-
-              raise SystemExit(1)
-
-          old = lines[patch_line]
-
-          lines[patch_line] = re.sub(
-              r'\bconst\s+',
-              '',
-              lines[patch_line],
-              count=1
-          )
-
-          print("")
-          print("Patched const constructor:")
-          print(f"OLD: {old}")
-          print(f"NEW: {lines[patch_line]}")
-
-          file.write_text("\n".join(lines) + "\n")
+          if count == 0:
+              print("IkunBanner reference not found.")
+          else:
+              text = text.replace(old, new)
+              file.write_text(text)
+              print("IkunBanner replacement completed.")
           PY
 
           echo ""
-          echo "Dashboard context:"
-          nl -ba "$FILE" | sed -n '195,225p'
+          echo "Checking result..."
+
+          grep -n "IkunBanner" "$FILE" || true
+          grep -n "SizedBox.shrink" "$FILE" || true
 
       # =========================================================
-      # 13. Check IkunBanner
-      # =========================================================
-      - name: Check IkunBanner
-        working-directory: ${{ env.PROJECT_ROOT }}
-        run: |
-          set -e
-
-          echo "Searching IkunBanner definition..."
-
-          grep -R -n \
-            "class IkunBanner" \
-            lib plugins \
-            2>/dev/null || true
-
-          echo ""
-          echo "IkunBanner references:"
-
-          grep -R -n \
-            "IkunBanner" \
-            lib plugins \
-            2>/dev/null | head -30 || true
-
-      # =========================================================
-      # 14. Check build environment
+      # 13. Check build environment
       # =========================================================
       - name: Check build environment
         run: |
@@ -449,10 +402,6 @@ jobs:
 
           flutter --version
 
-          echo ""
-          echo "======================================"
-          echo "Dart"
-          echo
           echo ""
           echo "======================================"
           echo "Dart"
@@ -500,7 +449,7 @@ jobs:
           echo "Clash.Meta go.mod exists."
 
       # =========================================================
-      # 15. Install dependencies
+      # 14. Install dependencies
       # =========================================================
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -512,7 +461,7 @@ jobs:
           flutter pub get
 
       # =========================================================
-      # 16. Build ARM64 APK
+      # 15. Build ARM64 APK
       # =========================================================
       - name: Build ARM64 APK
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -525,7 +474,7 @@ jobs:
             --verbose
 
       # =========================================================
-      # 17. Upload APK
+      # 16. Upload APK
       # =========================================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -535,7 +484,7 @@ jobs:
           if-no-files-found: error
 
       # =========================================================
-      # 18. Finish
+      # 17. Finish
       # =========================================================
       - name: Finish
         run: |
