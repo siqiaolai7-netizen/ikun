@@ -67,7 +67,48 @@ jobs:
           echo "Clash.Meta restored successfully."
 
       # =========================================================
-      # 4. Fix source package name
+      # 4. Fix Clash.Meta Go dependencies
+      # =========================================================
+      - name: Fix Clash.Meta Go dependencies
+        working-directory: ${{ env.PROJECT_ROOT }}/core/Clash.Meta
+        run: |
+          set -e
+
+          echo "======================================"
+          echo "Fixing Clash.Meta Go dependencies"
+          echo "======================================"
+
+          echo ""
+          echo "Go version:"
+          go version
+
+          echo ""
+          echo "Adding missing sing-shadowtls dependency..."
+
+          go get \
+            github.com/metacubex/sing-shadowtls@v0.0.0-20250503063515-5d9f966d17a2
+
+          echo ""
+          echo "Downloading Go modules..."
+
+          go mod download
+
+          echo ""
+          echo "Verifying Go modules..."
+
+          go mod verify
+
+          echo ""
+          echo "Checking sing-shadowtls..."
+
+          grep -n "github.com/metacubex/sing-shadowtls" go.mod || true
+          grep -n "github.com/metacubex/sing-shadowtls" go.sum || true
+
+          echo ""
+          echo "Clash.Meta Go dependencies fixed."
+
+      # =========================================================
+      # 5. Fix source package name
       # =========================================================
       - name: Fix source package name
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -97,7 +138,7 @@ jobs:
           echo "Package replacement completed."
 
       # =========================================================
-      # 5. Fix Dart SDK constraint
+      # 6. Fix Dart SDK constraint
       # =========================================================
       - name: Fix Dart SDK constraint
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -112,7 +153,7 @@ jobs:
           grep -n "sdk:" pubspec.yaml || true
 
       # =========================================================
-      # 6. Install Java 17
+      # 7. Install Java 17
       # =========================================================
       - name: Install Java
         uses: actions/setup-java@v5
@@ -121,7 +162,7 @@ jobs:
           java-version: "17"
 
       # =========================================================
-      # 7. Setup Flutter
+      # 8. Setup Flutter
       # =========================================================
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -131,7 +172,7 @@ jobs:
           cache: true
 
       # =========================================================
-      # 8. Setup Android NDK
+      # 9. Setup Android NDK
       # =========================================================
       - name: Setup Android NDK
         run: |
@@ -183,7 +224,7 @@ jobs:
           echo "NDK setup completed."
 
       # =========================================================
-      # 9. Install system libclang
+      # 10. Install system libclang
       # =========================================================
       - name: Setup libclang
         run: |
@@ -247,7 +288,7 @@ jobs:
           echo "System libclang installed."
 
       # =========================================================
-      # 10. Put libclang inside Android NDK
+      # 11. Put libclang inside Android NDK
       # =========================================================
       - name: Install libclang into NDK
         run: |
@@ -321,7 +362,7 @@ jobs:
           echo "NDK libclang setup completed."
 
       # =========================================================
-      # 11. Check Rust libclang
+      # 12. Check Rust libclang
       # =========================================================
       - name: Check Rust libclang
         run: |
@@ -337,6 +378,7 @@ jobs:
 
           echo ""
           echo "libclang in NDK:"
+
           ls -la "$NDK_LLVM/lib"/libclang*
           ls -la "$NDK_LLVM/lib64"/libclang*
 
@@ -344,7 +386,7 @@ jobs:
           echo "Rust libclang check passed."
 
       # =========================================================
-      # 12. Force NDK version
+      # 13. Force NDK version
       # =========================================================
       - name: Force NDK version
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -371,7 +413,7 @@ jobs:
           echo "27.3.13750724"
 
       # =========================================================
-      # 13. Fix missing IkunBanner
+      # 14. Fix missing IkunBanner
       # =========================================================
       - name: Fix missing IkunBanner
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -415,7 +457,7 @@ jobs:
           grep -n "SizedBox.shrink" "$FILE" || true
 
       # =========================================================
-      # 14. Check build environment
+      # 15. Check build environment
       # =========================================================
       - name: Check build environment
         run: |
@@ -440,6 +482,13 @@ jobs:
           echo "======================================"
 
           java -version
+
+          echo ""
+          echo "======================================"
+          echo "Go"
+          echo "======================================"
+
+          go version
 
           echo ""
           echo "======================================"
@@ -479,8 +528,23 @@ jobs:
 
           echo "Clash.Meta go.mod exists."
 
+          echo ""
+          echo "======================================"
+          echo "sing-shadowtls"
+          echo "======================================"
+
+          grep -n \
+            "github.com/metacubex/sing-shadowtls" \
+            "${GITHUB_WORKSPACE}/source/core/Clash.Meta/go.mod" \
+            || true
+
+          grep -n \
+            "github.com/metacubex/sing-shadowtls" \
+            "${GITHUB_WORKSPACE}/source/core/Clash.Meta/go.sum" \
+            || true
+
       # =========================================================
-      # 15. Install dependencies
+      # 16. Install dependencies
       # =========================================================
       - name: Install dependencies
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -492,7 +556,7 @@ jobs:
           flutter pub get
 
       # =========================================================
-      # 16. Build ARM64 APK
+      # 17. Build ARM64 APK
       # =========================================================
       - name: Build ARM64 APK
         working-directory: ${{ env.PROJECT_ROOT }}
@@ -505,7 +569,7 @@ jobs:
             --verbose
 
       # =========================================================
-      # 17. Upload APK
+      # 18. Upload APK
       # =========================================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -515,7 +579,7 @@ jobs:
           if-no-files-found: error
 
       # =========================================================
-      # 18. Finish
+      # 19. Finish
       # =========================================================
       - name: Finish
         run: |
